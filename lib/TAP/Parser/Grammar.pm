@@ -2,25 +2,27 @@ package TAP::Parser::Grammar;
 
 use strict;
 use vars qw($VERSION);
+use Carp;
 
 use TAP::Parser::Result;
+use TAP::Parser::YAMLish::Reader;
 
 =head1 NAME
 
-TAP::Parser::Grammar - A grammar for the original TAP version.
+TAP::Parser::Grammar - A grammar for the Test Anything Protocol.
 
 =head1 VERSION
 
-Version 0.51
+Version 0.52
 
 =cut
 
-$VERSION = '0.51';
+$VERSION = '0.52';
 
 =head1 DESCRIPTION
 
-C<TAP::Parser::Gramamr> is actually just a means for identifying individual
-chunks (usually lines) of TAP.
+C<TAP::Parser::Grammar> tokenizes lines from a TAP stream and constructs
+L<TAP::Parser::Result> subclasses to represent the tokens.
 
 Do not attempt to use this class directly.  It won't make sense.  It's mainly
 here to ensure that we will be able to have pluggable grammars when TAP is
@@ -41,49 +43,32 @@ to use a class where one doesn't apparently need one.
 
 =head3 C<new>
 
-  my $grammar = TAP::Grammar->new;
+  my $grammar = TAP::Grammar->new($stream);
 
-Returns TAP grammar object.  Future versions may accept a version number.
+Returns TAP grammar object that will parse the specified stream.
 
 =cut
 
 sub new {
-    my ($class) = @_;
-    bless {}, $class;
+    my ( $class, $stream ) = @_;
+    my $self = bless { stream => $stream }, $class;
+    $self->set_version( 12 );
+    return $self;
 }
 
 # XXX the 'not' and 'ok' might be on separate lines in VMS ...
 my $ok  = qr/(?:not )?ok\b/;
 my $num = qr/\d+/;
 
-# description is *any* which is not followed by an odd number of escapes
-# following by '#':  \\\#   \#
-my $description = qr/.*?(?!\\(?:\\\\)*)#?/;
-
-# if we have an even number of escapes in front of the '#', assert that it
-# does not have an escape in front of it (this gets around the 'no variable
-# length lookbehind assertions')
-my $directive = qr/
-                     (?<!\\)(?:\\\\)*
-                     (?i:
-                       \#\s+
-                       (TODO|SKIP)\b
-                       (.*)
-                     )?
-                   /x;
-
-my %token_for = (
+my %v12 = (
     version => {
         syntax  => qr/^TAP\s+version\s+(\d+)\s*\z/i,
         handler => sub {
             my ( $self, $line ) = @_;
             local *__ANON__ = '__ANON__version_token_handler';
             my $version = $1;
-            return $self->_make_version_token(
-                $line,
-                $version,
-            );
-        }
+            return $self->_make_version_token( $line, $version, );
+          }
     },
     plan => {
         syntax  => qr/^1\.\.(\d+)(?:\s*#\s*SKIP\b(.*))?\z/i,
@@ -92,41 +77,31 @@ my %token_for = (
             local *__ANON__ = '__ANON__plan_token_handler';
             my $tests_planned = $1;
             my $explanation   = $2;
-            my $skip =
-              ( 0 == $tests_planned || defined $explanation )
+            my $skip
+              = ( 0 == $tests_planned || defined $explanation )
               ? 'SKIP'
               : '';
             $explanation = '' unless defined $explanation;
-            return $self->_make_plan_token(
-                $line,
-                $tests_planned,
-                $skip,
-                _trim($explanation),
+            return $self->_make_plan_token( $line, $tests_planned, $skip,
+                _trim( $explanation ),
             );
         },
     },
     test => {
-        syntax => qr/^
-            ($ok)
-            \s*
-            ($num)?
-            \s*
-            ($description)?
-            $directive    # $4 = directive, $5 = explanation
-        \z/x,
+        syntax  => qr/^($ok) \s* ($num)? \s* (.*) \z/x,
         handler => sub {
             my ( $self, $line ) = @_;
             local *__ANON__ = '__ANON__test_token_handler';
-            my ( $ok, $num, $desc, $dir, $explanation )
-              = ( $1, $2, $3, $4, $5 );
-            return $self->_make_test_token(
-                $line,
-                $ok,
-                $num,
-                $desc,
-                uc $dir,
-                $explanation
-            );
+            my ( $ok, $num, $desc ) = ( $1, $2, $3 );
+            my ( $dir, $explanation ) = ( '', '' );
+            if ( $desc
+                =~ m/^ ( [^\\\#]* (?: \\. [^\\\#]* )* ) 
+                       \# \s* (SKIP|TODO) \b \s* (.*) $/ix
+              ) {
+                ( $desc, $dir, $explanation ) = ( $1, $2, $3 );
+            }
+            return $self->_make_test_token( $line, $ok, $num, _trim( $desc ),
+                uc $dir, $explanation );
         },
     },
     comment => {
@@ -144,42 +119,82 @@ my %token_for = (
             my ( $self, $line ) = @_;
             local *__ANON__ = '__ANON__bailout_token_handler';
             my $explanation = $1;
-            return $self->_make_bailout_token( $line, _trim($explanation) );
+            return $self->_make_bailout_token( $line, _trim( $explanation ) );
         },
     },
 );
+
+my %v13 = (
+    %v12,
+    yaml => {
+        syntax  => qr/^ (\s+) (---.*) $/x,
+        handler => sub {
+            my ( $self, $line ) = @_;
+            local *__ANON__ = '__ANON__yaml_token_handler';
+            my ( $pad, $marker ) = ( $1, $2 );
+            return $self->_make_yaml_token( $pad, $marker );
+        },
+    },
+);
+
+my %token_for = (
+    '12' => \%v12,
+    '13' => \%v13,
+);
+
+##############################################################################
+
+=head3 C<set_version>
+
+  $grammar->set_version(13);
+  
+Tell the grammar which TAP syntax version to support. The lowest
+supported version is 12. Although 'TAP version' isn't valid version 12
+syntax it is accepted so that higher version numbers may be parsed.
+
+=cut
+
+sub set_version {
+    my $self    = shift;
+    my $version = shift;
+
+    if ( my $tokens = $token_for{$version} ) {
+        $self->{tokens} = $tokens;
+    }
+    else {
+        croak "Unsupported syntax version: $version";
+    }
+}
 
 ##############################################################################
 
 =head3 C<tokenize>
 
-  my $token = $grammar->tokenize($string);
+  my $token = $grammar->tokenize;
 
-Passed a line of TAP, this method will return a data structure representing a
-'token' matching that line of TAP input.  Designed to be passed to
-C<TAP::Parser::Result> to create a result object.
-
-This is really the only method you need to worry about for the grammar.  The
-methods below are merely for convenience, if needed.
+This method will return a C<TAP::Parser::Result> object representing the
+current line of TAP.
 
 =cut
 
 sub tokenize {
     my $self = shift;
-    return unless @_ && defined $_[0];
 
-    my $line = shift;
+    my $stream = $self->{stream};
+    my $line   = $stream->next;
+    return unless defined $line;
+
     my $token;
 
-    foreach my $token_data ( values %token_for ) {
+    foreach my $token_data ( values %{ $self->{tokens} } ) {
         if ( $line =~ $token_data->{syntax} ) {
             my $handler = $token_data->{handler};
-            $token = $self->$handler($line);
+            $token = $self->$handler( $line );
             last;
         }
     }
-    $token ||= $self->_make_unknown_token($line);
-    return defined $token ? TAP::Parser::Result->new($token) : ();
+    $token ||= $self->_make_unknown_token( $line );
+    return defined $token ? TAP::Parser::Result->new( $token ) : ();
 }
 
 ##############################################################################
@@ -194,7 +209,10 @@ Returns the different types of tokens which this grammar can parse.
 
 =cut
 
-sub token_types { keys %token_for }
+sub token_types {
+    my $self = shift;
+    return keys %{ $self->{tokens} };
+}
 
 ##############################################################################
 
@@ -210,8 +228,8 @@ C<< qr/^#(.*)/ >>.
 =cut
 
 sub syntax_for {
-    my ( $proto, $type ) = @_;
-    return $token_for{$type}{syntax};
+    my ( $self, $type ) = @_;
+    return $self->{tokens}->{$type}->{syntax};
 }
 
 ##############################################################################
@@ -241,16 +259,16 @@ TAP parsing loop looks similar to the following:
 =cut
 
 sub handler_for {
-    my ( $proto, $type ) = @_;
-    return $token_for{$type}{handler};
+    my ( $self, $type ) = @_;
+    return $self->{tokens}->{$type}->{handler};
 }
 
 sub _make_version_token {
     my ( $self, $line, $version ) = @_;
     return {
-        type          => 'version',
-        raw           => $line,
-        version       => $version,
+        type    => 'version',
+        raw     => $line,
+        version => $version,
     };
 }
 
@@ -260,8 +278,7 @@ sub _make_plan_token {
         $skip ||= 'SKIP';
     }
     if ( $skip && 0 != $tests_planned ) {
-        warn
-          "Specified SKIP directive in plan but more than 0 tests ($line)\n";
+        warn "Specified SKIP directive in plan but more than 0 tests ($line)\n";
     }
     return {
         type          => 'plan',
@@ -277,9 +294,9 @@ sub _make_test_token {
     my %test = (
         ok          => $ok,
         test_num    => $num,
-        description => _trim($desc),
-        directive   => uc($dir),
-        explanation => _trim($explanation),
+        description => _trim( $desc ),
+        directive   => uc( $dir ),
+        explanation => _trim( $explanation ),
         raw         => $line,
         type        => 'test',
     );
@@ -299,7 +316,7 @@ sub _make_comment_token {
     return {
         type    => 'comment',
         raw     => $line,
-        comment => _trim($1)
+        comment => _trim( $1 )
     };
 }
 
@@ -308,7 +325,35 @@ sub _make_bailout_token {
     return {
         type    => 'bailout',
         raw     => $line,
-        bailout => _trim($1)
+        bailout => _trim( $1 )
+    };
+}
+
+sub _make_yaml_token {
+    my ( $self, $pad, $marker ) = @_;
+
+    my $yaml = TAP::Parser::YAMLish::Reader->new;
+
+    my $stream = $self->{stream};
+
+    # Construct a reader that reads from our input stripping leading
+    # spaces from each line.
+    my $leader = length( $pad );
+    my $strip  = qr{ ^ (\s{$leader}) (.*) $ }x;
+    my @extra  = ( $marker );
+    my $reader = sub {
+        return shift @extra if @extra;
+        my $line = $stream->next;
+        return $2 if $line =~ $strip;
+        return;
+    };
+
+    my $data = $yaml->read( $reader );
+
+    return {
+        type => 'yaml',
+        raw  => $yaml->get_raw,
+        data => $data
     };
 }
 

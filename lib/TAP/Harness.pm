@@ -9,7 +9,6 @@ use File::Path;
 use TAP::Base;
 use TAP::Parser;
 use TAP::Parser::Aggregator;
-use TAP::Parser::YAML;
 
 use vars qw($VERSION @ISA);
 
@@ -21,11 +20,11 @@ TAP::Harness - Run Perl test scripts with statistics
 
 =head1 VERSION
 
-Version 0.51
+Version 0.52
 
 =cut
 
-$VERSION = '0.51';
+$VERSION = '0.52';
 
 $ENV{HARNESS_ACTIVE}  = 1;
 $ENV{HARNESS_VERSION} = $VERSION;
@@ -38,6 +37,7 @@ END {
 }
 
 my $TIME_HIRES;
+my $MAX_ERRORS = 5;
 
 BEGIN {
     eval 'use Time::HiRes qw(time)';
@@ -82,7 +82,7 @@ BEGIN {
                 $dirs .= 's' if @bad_libs > 1;
                 $self->_error("No such $dirs (@bad_libs)");
             }
-            return [ map {"-I$_"} @$libs ];
+            return [ map { '-I' . File::Spec->rel2abs($_) } @$libs ];
         },
         switches => sub {
             my ( $self, $switches ) = @_;
@@ -100,18 +100,12 @@ BEGIN {
         quiet        => sub { shift; shift },
         really_quiet => sub { shift; shift },
         exec         => sub { shift; shift },
-        execrc => sub {
-            my ( $self, $execrc ) = @_;
-            unless ( -f $execrc ) {
-                $self->_error("Cannot find execrc ($execrc)");
-            }
-            return $execrc;
-        },
+        merge        => sub { shift; shift },
+        formatter    => sub { shift; shift },
     );
     my @getter_setters = qw/
       _curr_parser
       _curr_test
-      _execrc
       _longest
       _newline_printed
       _printed_summary_header
@@ -203,10 +197,45 @@ TAP is fine.  You can use this argument to specify the name of the program
 (and optional switches) to run your tests with:
 
   exec => '/usr/bin/ruby -w'
+  
+=item * C<merge>
 
-=item * C<execrc>
+If C<merge> is true the harness will create parsers that merge STDOUT
+and STDERR together for any processes they start.
 
-Location of 'execrc' file.  See L<USING EXECRC> below.
+=item * C<formatter>
+
+If set C<formatter> must be an object that is capable of formatting
+individual items from the TAP stream. For each type of item it is
+capable of formatting it must expose a method called format_I<type>.
+
+For example:
+
+    sub format_yaml {
+        my ($self, $harness, $result, $prev_result) = @_;
+        # Format the item and return a string
+        return _format_yaml_line( $result, $prev_result );
+    }
+
+The formatting method is called with three arguments in addition to $self:
+
+=over
+
+=item C<$harness>
+
+The test harness.
+
+=item C<$result>
+
+The result which we should format.
+
+=item C<$prev_result>
+
+The previous result. This is necessary in the case of, for example,
+C<format_yaml> which will want to know whether the preceding test passed
+or failed.
+
+=back
 
 =item * C<errors>
 
@@ -253,43 +282,10 @@ This overrides other settings such as C<verbose> or C<failures>.
         if ( my @props = keys %arg_for ) {
             $self->_croak("Unknown arguments to TAP::Harness::new (@props)");
         }
-        $self->_read_execrc;
         $self->quiet(0) unless $self->quiet;    # suppress unit warnings
         $self->really_quiet(0) unless $self->really_quiet;
         return $self;
     }
-}
-
-sub _read_execrc {
-    my $self = shift;
-    $self->_execrc( { exact => {}, regex => {} } );
-    my $execrc = $self->execrc or return $self;
-    my $data = TAP::Parser::YAML->read($execrc);
-
-    my %exec_for;
-    foreach my $type (qw{ exact regex }) {
-        foreach my $exec ( @{ $data->[0]{$type} } ) {
-            if ( 'regex' eq $type ) {
-                eval {qr/$exec/};
-                if ( my $error = $@ ) {
-                    warn "Can't use execrc item ($exec) as a regex: $error";
-                    next;
-                }
-            }
-            my $test = $exec->[-1];
-            $exec_for{$type}{$test} = $exec;
-        }
-    }
-
-    if ( my $exec = $data->[0]{default} ) {
-        $exec = $exec->[0];
-
-        # don't override command line
-        $self->exec($exec) unless $self->exec;
-    }
-
-    $self->_execrc( \%exec_for );
-    return $self;
 }
 
 ##############################################################################
@@ -312,6 +308,8 @@ should name a directory into which a copy of the raw TAP for each test
 will be written. TAP is written to files named for each test.
 Subdirectories will be created as needed.
 
+Returns a TAP::Parser::Aggregator containing the test results.
+
 =cut
 
 sub runtests {
@@ -322,6 +320,8 @@ sub runtests {
     my $results = $self->aggregate_tests( $aggregate, @tests );
 
     $self->summary($results);
+    
+    return $aggregate;
 }
 
 =head3 C<aggregate_tests>
@@ -399,10 +399,6 @@ You can print a useful summary time, if desired, with:
 
   $self->output(timestr( timediff( Benchmark->new, $start_time ), 'nop' ));
 
-=item * C<aggregate>
-
-This is the C<TAP::Parser::Aggregate> object for all of the tests run.
-
 =item * C<tests>
 
 This is an array reference of all test names.  To get the C<TAP::Parser>
@@ -464,21 +460,24 @@ sub summary {
             }
 
             if ( my @errors = $parser->parse_errors ) {
+                my $explain;
+                if ( @errors > $MAX_ERRORS && !$self->errors ) {
+                    $explain = "Displayed the first $MAX_ERRORS of "
+                      . scalar(@errors)
+                      . " TAP syntax errors.\n"
+                      . "Re-run runtests with the -p option to see them all.\n";
+                    splice @errors, $MAX_ERRORS;
+                }
                 $self->_summary_test_header( $test, $parser );
-                if ( $self->errors || 1 == @errors ) {
-                    $self->failure_output(
-                        sprintf "  Parse errors: %s\n",
-                        shift @errors
-                    );
-                    foreach my $error (@errors) {
-                        my $spaces = ' ' x 16;
-                        $self->failure_output("$spaces$error\n");
-                    }
+                $self->failure_output(
+                    sprintf "  Parse errors: %s\n",
+                    shift @errors
+                );
+                foreach my $error (@errors) {
+                    my $spaces = ' ' x 16;
+                    $self->failure_output("$spaces$error\n");
                 }
-                else {
-                    $self->failure_output(
-                        "  Errors encountered while parsing tap\n");
-                }
+                $self->failure_output($explain) if $explain;
             }
         }
     }
@@ -690,41 +689,14 @@ sub output_test_failure {
     $self->output("\n");
 }
 
-sub _get_executable {
-    my ( $self, $test ) = @_;
-    my $execrc = $self->_execrc;
-
-    my $executable;
-    if ( my $exec = $execrc->{exact}{$test} ) {
-        $executable = $exec;
-    }
-    else {
-        foreach my $regex ( keys %{ $execrc->{regex} } ) {
-            if ( $test =~ qr/$regex/ ) {
-                $executable = $execrc->{regex}{$regex};
-                $executable->[-1] = $test;
-            }
-        }
-    }
-    if ( my $exec = $self->exec ) {
-        $executable ||= [ @$exec, $test ];
-    }
-    return $executable;
-}
-
 sub _get_parser_args {
     my ( $self, $test ) = @_;
     my %args = ( source => $test );
     my @switches = $self->lib if $self->lib;
     push @switches => $self->switches if $self->switches;
     $args{switches} = \@switches;
-
-    if ( my $exec = $self->_get_executable($test) ) {
-        $args{exec} = $exec;
-        delete $args{source};
-    }
-
-    $args{spool} = $self->_open_spool($test);
+    $args{spool}    = $self->_open_spool($test);
+    $args{merge}    = $self->merge;
     return \%args;
 }
 
@@ -740,9 +712,13 @@ sub _runtest {
     $self->_make_callback( 'made_parser', $parser );
 
     my $plan = '';
+
     $self->_newline_printed(0);
-    my $start_time = time();
-    my $output     = 'output';
+
+    my $start_time  = time();
+    my $output      = 'output';
+    my $prev_result = undef;
+
     while ( defined( my $result = $parser->next ) ) {
         $output = $self->_get_output_method($parser);
         if ( $result->is_bailout ) {
@@ -760,7 +736,8 @@ sub _runtest {
               unless $really_quiet;
             $self->_newline_printed(0);
         }
-        $self->_process( $parser, $result );
+        $self->_process( $parser, $result, $prev_result );
+        $prev_result = $result;
     }
 
     $self->_close_spool;
@@ -820,15 +797,36 @@ sub _close_spool {
     }
 }
 
+sub _format_result {
+    my ( $self, $result, $prev_result ) = @_;
+    my $sig = 'format_' . $result->type;
+    if ( my $formatter = $self->formatter ) {
+        if ( my $method = $formatter->can($sig) ) {
+            return $formatter->$method( $self, $result, $prev_result );
+        }
+    }
+    return $result->as_string;
+}
+
+sub _output_result {
+    my ( $self, $parser, $result, $prev_result ) = @_;
+    $self->output( $self->_format_result( $result, $prev_result ) );
+}
+
 sub _process {
-    my ( $self, $parser, $result ) = @_;
+    my ( $self, $parser, $result, $prev_result ) = @_;
     return if $self->really_quiet;
-    if ( $self->_should_display( $parser, $result ) ) {
+    if ( $self->_should_display( $parser, $result, $prev_result ) ) {
         unless ( $self->_newline_printed ) {
             $self->output("\n") unless $self->quiet;
             $self->_newline_printed(1);
         }
-        $self->output( $result->as_string . "\n" ) unless $self->quiet;
+
+        # TODO: quiet gets tested here /and/ in _should_display
+        unless ( $self->quiet ) {
+            $self->_output_result( $parser, $result, $prev_result );
+            $self->output("\n");
+        }
     }
 }
 
@@ -838,7 +836,7 @@ sub _get_output_method {
 }
 
 sub _should_display {
-    my ( $self, $parser, $result ) = @_;
+    my ( $self, $parser, $result, $prev_result ) = @_;
 
     # Always output directives
     return $result->has_directive if $self->directives;
@@ -850,10 +848,14 @@ sub _should_display {
       if $self->_should_show_failure($result)
       || ( $self->verbose && !$self->failures );
 
+    # TODO: Work out what to do with is_yaml results
     return 1
-      if $result->is_comment
+      if ( $result->is_comment || $result->is_yaml )
       && !$self->quiet
-      && ( !$parser->in_todo || $result->is_test );
+      && !$parser->in_todo;
+
+    # Old line. Makes no sense. Can't be is_test /and/ is_comment.
+    #      && ( !$parser->in_todo || $result->is_test );
 
     return 0;
 }
@@ -878,84 +880,6 @@ sub _croak {
     }
     $self->SUPER::_croak($message);
 }
-
-=head1 USING EXECRC
-
-B<WARNING>:  this functionality is still experimental.  While we intend to
-support it, the file format may change.
-
-Sometimes you want to use different executables to run different tests.  If
-that's the case, you'll need to create an C<execrc> file.  This file should be
-a YAML file.  This should be representating a hash with (at present) three
-keys, C<exact>, C<regex>, and C<default>.
-
- ---
- exact: 
-   # whoops!  We have a ruby test here!
-   -
-     - /usr/bin/ruby
-     - t/ruby.t
- regex:
-   # let's test some web pages
-   -
-     - /usr/bin/perl
-     - -w
-     - bin/test_html.pl
-     - ^https?://
- default:
-   -
-     - /usr/bin/perl
-     - -wT
-  
-=over 4
-
-=item * C<exact>
-
-The C<exact> key should be an array reference with each element being an array
-reference whose items are an exact list of what need to be passed to the shell
-to execute the test.  So for the 'exact' item of C<t/ruby.t> above, we attempt
-to execute in the shell:
-
- /usr/bin/ruby t/ruby.t
-
-=item * C<regex>
-
-This is the same as C<exact>, except that the final element in each array
-reference should be a Perl regular expression.  For the C<^https?://> regular
-expression above, when the harness sees a test for C<http://www.example.com>,
-it will pass the following to the shell:
-
- /usr/bin/perl -w bin/test_html.pl http://www.example.com/
-
-=item * C<default>
-
-Any item which the harness does not match to another C<execrc> entry will
-automatically be executed with the C<default>.
-
-=back
-
-Blank lines are allowed.  Lines beginning with a '#' are comments (the '#' may
-have spaces in front of it).
-
-So for the above C<execrc> file, if it's named 'my_execrc' (as it is in the
-C<examples/> directory which comes with this distribution), then you could
-potentially run it like this, if you're using the C<runtests> utility:
-
- runtests --execrc my_execrc t/ - < list_of_urls.txt
-
-Then for a test named C<t/test_is_written_in_ruby.t>, it will be executed
-with:
-
- /usr/bin/ruby -w t/test_is_written_in_ruby.t
-
-If the list of urls contains "http://www.google.com/", it will be executed as
-follows:
-
- /usr/bin/perl test_html.pl http://www.google.com/
-
-Of course, if C<test_html.pl> outputs anything other than TAP, this will fail.
-
-See the C<README> in the C<examples> directory for a ready-to-run example.
 
 =head1 REPLACING
 

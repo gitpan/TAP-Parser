@@ -8,7 +8,8 @@ use TAP::Parser::Grammar;
 use TAP::Parser::Result;
 use TAP::Parser::Source;
 use TAP::Parser::Source::Perl;
-use TAP::Parser::Iterator;
+use TAP::Parser::Iterator::Array;
+use TAP::Parser::Iterator::Stream;
 
 @ISA = qw(TAP::Base);
 
@@ -18,13 +19,22 @@ TAP::Parser - Parse L<TAP|Test::Harness::TAP> output
 
 =head1 VERSION
 
-Version 0.51
+Version 0.52
 
 =cut
 
-$VERSION = '0.51';
+$VERSION = '0.52';
 
-my $DEFAULT_TAP_VERSION = 3;
+my $DEFAULT_TAP_VERSION = 12;
+my $MAX_TAP_VERSION     = 13;
+
+$ENV{TAP_VERSION} = $MAX_TAP_VERSION;
+
+END {
+
+    # For VMS.
+    delete $ENV{TAP_VERSION};
+}
 
 BEGIN {
     foreach my $method (
@@ -122,9 +132,9 @@ determine how to handle the source, the following steps are taken.
 If the source contains a newline, it's assumed to be a string of raw TAP
 output.
 
-If the source is a reference, it's assumed to be something to pass to the
-C<TAP::Parser::Iterator> constructor.  This is used internally and you should
-not use it.
+If the source is a reference, it's assumed to be something to pass to
+the C<TAP::Parser::Iterator::Stream> constructor. This is used
+internally and you should not use it.
 
 Otherwise, the parser does a C<-e> check to see if the source exists.  If so,
 it attempts to execute the source and read the output as a stream.  This is by
@@ -141,9 +151,10 @@ The value should be the complete TAP output.
 
 =item * C<exec>
 
-If passed an array reference, will attempt to create the iterator by passing a
-C<TAP::Parser::Source> object to C<TAP::Parser::Iterator>, using the array
-reference strings as the command arguments to C<&IPC::Open3::open3>:
+If passed an array reference, will attempt to create the iterator by
+passing a C<TAP::Parser::Source> object to
+C<TAP::Parser::Iterator::Source>, using the array reference strings as
+the command arguments to C<&IPC::Open3::open3>:
 
  exec => [ '/usr/bin/ruby', 't/my_test.rb' ]
 
@@ -193,6 +204,12 @@ be used when invoking the perl executable.
 =item * C<spool>
 
 If passed a filehandle will write a copy of all parsed TAP to that handle.
+
+=item * C<merge>
+
+If exec is used to specify a process to run this flag determines
+whether STDOUT and STDERR of the process are merged. If false STDOUT is
+not captured.
 
 =back
 
@@ -296,6 +313,7 @@ sub run {
       comment
       bailout
       unknown
+      yaml
       ALL
       ELSE
     );
@@ -315,6 +333,7 @@ sub run {
         my $exec   = delete $arg_for->{exec};
         my $merge  = delete $arg_for->{merge};
         my $spool  = delete $arg_for->{spool};
+
         if ( 1 < grep {defined} $stream, $tap, $source ) {
             $self->_croak(
                 "You may only choose one of 'stream', 'tap', or'source'");
@@ -324,7 +343,8 @@ sub run {
                 '"source" and "exec" are mutually exclusive options');
         }
         if ($tap) {
-            $stream = TAP::Parser::Iterator->new( [ split "\n" => $tap ] );
+            $stream
+              = TAP::Parser::Iterator::Array->new( [ split "\n" => $tap ] );
         }
         elsif ($exec) {
             my $source = TAP::Parser::Source->new;
@@ -340,14 +360,17 @@ sub run {
             }
         }
         elsif ($source) {
-            if ( ref $source ) {
+            if ( my $ref = ref $source ) {
                 $stream = TAP::Parser::Iterator->new($source);
             }
             elsif ( -e $source ) {
 
                 my $perl = TAP::Parser::Source::Perl->new;
+
                 $perl->switches( $arg_for->{switches} )
                   if $arg_for->{switches};
+
+                $perl->merge($merge);
 
                 $stream = $perl->source($source)->get_stream;
                 if ( defined $stream ) {
@@ -368,13 +391,15 @@ sub run {
             $self->_croak("PANIC:  could not determine stream");
         }
 
-        $self->_stream($stream);
-        $self->_grammar( TAP::Parser::Grammar->new($self) );
-        $self->_spool($spool);
-
         while ( my ( $k, $v ) = each %initialize ) {
             $self->{$k} = 'ARRAY' eq ref $v ? [] : $v;
         }
+
+        $self->_stream($stream);
+        my $grammar = TAP::Parser::Grammar->new($stream);
+        $grammar->set_version( $self->version );
+        $self->_grammar($grammar);
+        $self->_spool($spool);
 
         return $self;
     }
@@ -398,13 +423,13 @@ examples of each, are as follows:
 
 =over 4
 
+=item * Version
+
+ TAP version 12
+
 =item * Plan
 
  1..42
-
-=item * Version
-
- TAP version 4
 
 =item * Test
 
@@ -456,11 +481,17 @@ Indicates whether or not this is a test line.
 
 =head3 C<is_comment>
 
-Indicates whether or not this is a comment.
+Indicates whether or not this is a comment. Comments will generally only
+appear in the TAP stream if STDERR is merged to STDOUT. See the
+C<merge> option.
 
 =head3 C<is_bailout>
 
 Indicates whether or not this is bailout line.
+
+=head3 C<is_yaml>
+
+Indicates whether or not the current item is a YAML block.
 
 =head3 C<is_unknown>
 
@@ -833,8 +864,8 @@ match the number of C<< $parser->tests_planned >>.
   $parser->version;
   
 Once the parser is done, this will return the version number for the
-parsed TAP. Version numbers were introduced with TAP version 4 so if no
-version number is found version 3 is assumed.
+parsed TAP. Version numbers were introduced with TAP version 13 so if no
+version number is found version 12 is assumed.
 
 =head3 C<exit>
 
@@ -938,7 +969,8 @@ sub _next {
     my $self   = shift;
     my $stream = $self->_stream;
 
-    my $result = $self->_grammar->tokenize( $stream->next );
+    my $result = eval { $self->_grammar->tokenize };
+    $self->_add_error($@) if $@;
 
     if ($result) {
         $self->_next_state($result);
@@ -1009,6 +1041,12 @@ BEGIN {
                 $self->_aggregate_results($test);
             },
         },
+        yaml => {
+            act => sub {
+                my ( $self, $test ) = @_;
+                local *__ANON__ = '__ANON__yaml_handler';
+            },
+        },
     );
 
 # Each state contains a hash the keys of which match a token type. For each token
@@ -1027,10 +1065,18 @@ BEGIN {
                         my $ver_min = $DEFAULT_TAP_VERSION + 1;
                         $self->_add_error(
                                 "Explicit TAP version must be at least "
-                              . "$ver_min. Got version $ver_num"
+                              . "$ver_min. Got version $ver_num" );
+                        $ver_num = $DEFAULT_TAP_VERSION;
+                    }
+                    if ( $ver_num > $MAX_TAP_VERSION ) {
+                        $self->_add_error(
+                                "TAP specified version $ver_num but we don't "
+                              . "about versions later than $MAX_TAP_VERSION"
                         );
+                        $ver_num = $MAX_TAP_VERSION;
                     }
                     $self->version($ver_num);
+                    $self->_grammar->set_version($ver_num);
                 },
                 goto => 'PLAN'
             },
@@ -1042,7 +1088,7 @@ BEGIN {
             test => { goto => 'UNPLANNED' },
         },
         PLANNED => {
-            test => {},
+            test => { goto => 'PLANNED_AFTER_TEST' },
             plan => {
                 act => sub {
                     my ( $self, $version ) = @_;
@@ -1051,6 +1097,11 @@ BEGIN {
                         "More than one plan found in TAP output");
                 },
             },
+        },
+        PLANNED_AFTER_TEST => {
+            test => { act  => sub { }, continue => 'PLANNED' },
+            plan => { act  => sub { }, continue => 'PLANNED' },
+            yaml => { goto => 'PLANNED' },
         },
         GOT_PLAN => {
             test => {
@@ -1071,8 +1122,13 @@ BEGIN {
             },
         },
         UNPLANNED => {
-            test => {},
+            test => { goto => 'UNPLANNED_AFTER_TEST' },
             plan => { goto => 'GOT_PLAN' },
+        },
+        UNPLANNED_AFTER_TEST => {
+            test => { act  => sub { }, continue => 'UNPLANNED' },
+            plan => { act  => sub { }, continue => 'UNPLANNED' },
+            yaml => { goto => 'PLANNED' },
         },
     );
 
@@ -1158,11 +1214,12 @@ sub _finish {
 
 =head2 CALLBACKS
 
-As mentioned earlier, a "callback" key may be added may be added to the
-C<TAP::Parser> constructor.  If present, each callback corresponding to a
-given result type will be called with the result as the argument if the C<run>
-method is used.  The callback is expected to be a subroutine reference (or
-anonymous subroutine) which is invoked with the parser result as its argument.
+As mentioned earlier, a "callback" key may be added to the
+C<TAP::Parser> constructor. If present, each callback corresponding to a
+given result type will be called with the result as the argument if the
+C<run> method is used. The callback is expected to be a subroutine
+reference (or anonymous subroutine) which is invoked with the parser
+result as its argument.
 
  my %callbacks = (
      test    => \&test_callback,
@@ -1189,7 +1246,7 @@ Callbacks may also be added like this:
  $parser->callback( test => \&test_callback );
  $parser->callback( plan => \&plan_callback );
 
-There are, at the present time, seven keys allowed for callbacks.  These keys
+There are, at the present time, nine keys allowed for callbacks.  These keys
 are case-sensitive.
 
 =over 4
@@ -1198,29 +1255,37 @@ are case-sensitive.
 
 Invoked if C<< $result->is_test >> returns true.
 
-=item 2 C<plan>
+=item 2 C<version>
+
+Invoked if C<< $result->is_version >> returns true.
+
+=item 3 C<plan>
 
 Invoked if C<< $result->is_plan >> returns true.
 
-=item 3 C<comment>
+=item 4 C<comment>
 
 Invoked if C<< $result->is_comment >> returns true.
 
-=item 4 C<bailout>
+=item 5 C<bailout>
 
 Invoked if C<< $result->is_unknown >> returns true.
 
-=item 5 C<unknown>
+=item 6 C<yaml>
+
+Invoked if C<< $result->is_yaml >> returns true.
+
+=item 6 C<unknown>
 
 Invoked if C<< $result->is_unknown >> returns true.
 
-=item 6 C<ELSE>
+=item 7 C<ELSE>
 
 If a result does not have a callback defined for it, this callback will be
 invoked.  Thus, if all five of the previous result types are specified as
 callbacks, this callback will I<never> be invoked.
 
-=item 7 C<ALL>
+=item 8 C<ALL>
 
 This callback will always be invoked and this will happen for each result
 after one of the above six callbacks is invoked.  For example, if
@@ -1347,8 +1412,6 @@ just words of encouragement have all been forthcoming.
 =item * Corion
 
 =item * Mark Stosberg
-
-=item * Andy Armstrong
 
 =item * Matt Kraai
 

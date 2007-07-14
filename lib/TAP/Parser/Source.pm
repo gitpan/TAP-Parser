@@ -3,14 +3,6 @@ package TAP::Parser::Source;
 use strict;
 use vars qw($VERSION);
 
-use IPC::Open3;
-use IO::Select;
-use IO::Handle;
-
-use constant IS_WIN32 => ( $^O =~ /^(MS)?Win32$/ );
-use constant IS_MACOS => ( $^O eq 'MacOS' );
-use constant IS_VMS   => ( $^O eq 'VMS' );
-
 use TAP::Parser::Iterator;
 
 # Causes problem on MacOS and shouldn't be necessary anyway
@@ -22,11 +14,11 @@ TAP::Parser::Source - Stream output from some source
 
 =head1 VERSION
 
-Version 0.51
+Version 0.52
 
 =cut
 
-$VERSION = '0.51';
+$VERSION = '0.52';
 
 =head1 DESCRIPTION
 
@@ -100,31 +92,11 @@ sub get_stream {
     my @command = $self->_get_command
       or $self->_croak("No command found!");
 
-    my $stdout_handle = IO::Handle->new();
-
-    my $pid;
-    eval { $pid = open3( undef, $stdout_handle, undef, @command ); };
-
-    if ($@) {
-
-        # TODO: Need to do something better with the error info here.
-        $self->exit( $? >> 8 );
-        $self->error("Could not execute (@command): $!");
-        return;
-    }
-    else {
-        if (IS_WIN32) {
-
-            # open3 defaults to raw mode, need this for Windows. Maybe
-            # other platforms too?
-            # TODO: What was the first perl version that supports this?
-            binmode $stdout_handle, ':crlf';
+    return TAP::Parser::Iterator->new(
+        {   command => \@command,
+            merge   => $self->merge
         }
-
-        my $iter = TAP::Parser::Iterator->new($stdout_handle);
-        $iter->pid($pid);
-        return $iter;
-    }
+    );
 }
 
 sub _get_command { @{ shift->source } }
@@ -168,18 +140,18 @@ sub exit {
 
 ##############################################################################
 
-=head3 C<pid>
+=head3 C<merge>
 
-  my $pid = $source->pid;
+  my $merge = $source->merge;
 
-Returns the pid of the command being used to execute the tests.
+Sets or returns the flag that dictates whether STDOUT and STDERR are merged.
 
 =cut
 
-sub pid {
+sub merge {
     my $self = shift;
-    return $self->{pid} unless @_;
-    $self->{pid} = shift;
+    return $self->{merge} unless @_;
+    $self->{merge} = shift;
     return $self;
 }
 

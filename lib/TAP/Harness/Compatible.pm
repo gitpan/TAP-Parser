@@ -36,21 +36,22 @@ TAP::Harness::Compatible - Run Perl standard test scripts with statistics
 
 =head1 VERSION
 
-Version 0.51
+Version 0.52
 
 =cut
 
-$VERSION = '0.51';
+$VERSION = '0.52';
 
 # Backwards compatibility for exportable variable names.
 *verbose  = *Verbose;
 *switches = *Switches;
 *debug    = *Debug;
 
-$ENV{HARNESS_ACTIVE} = 1;
+$ENV{HARNESS_ACTIVE}  = 1;
 $ENV{HARNESS_VERSION} = $VERSION;
 
 END {
+
     # For VMS.
     delete $ENV{HARNESS_ACTIVE};
     delete $ENV{HARNESS_VERSION};
@@ -135,11 +136,24 @@ sub _canon {
 
 sub _new_harness {
 
-    # TODO: lib? switches?
+    # This is a bit crufty. The switches have all been joined into a
+    # single string so we have to try and recover them.
+    my ( @lib, @switches );
+    for my $opt (split( / \s+ (?=-) /x, $Switches )) {
+        if ( $opt =~ /^ -I (.*) $ /x ) {
+            push @lib, $1;
+        }
+        else {
+            push @switches, $opt;
+        }
+    }
+
     my $args = {
         verbose    => $Verbose,
         timer      => $Timer,
         directives => $Directives,
+        lib        => \@lib,
+        switches   => \@switches,
     };
 
     return TAP::Harness->new($args);

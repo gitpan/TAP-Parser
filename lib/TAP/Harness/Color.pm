@@ -87,11 +87,11 @@ TAP::Harness::Color - Run Perl test scripts with color
 
 =head1 VERSION
 
-Version 0.51
+Version 0.52
 
 =cut
 
-$VERSION = '0.51';
+$VERSION = '0.52';
 
 =head1 DESCRIPTION
 
@@ -103,8 +103,8 @@ in color.  Passing tests are printed in green.  Failing tests are in red.
 Skipped tests are blue on a white background and TODO tests are printed in
 white.
 
-If C<Term::ANSIColor> cannot be found or if running under Windows, tests will
-be run without color.
+If L<Term::ANSIColor> cannot be found (or L<Win32::Console> if running
+under Windows) tests will be run without color.
 
 =head1 SYNOPSIS
 
@@ -139,6 +139,21 @@ sub new {
     }
     return $class->SUPER::new(@_);
 }
+##############################################################################
+
+=head3 C<can_color>
+
+  Test::Harness::Color->can_color()
+
+Returns a boolean indicating whether or not this module can actually
+generate colored output. This will be false if it could not load the
+modules needed for the current platform.
+
+=cut
+
+sub can_color {
+    return !$NO_COLOR;
+}
 
 ##############################################################################
 
@@ -170,11 +185,8 @@ sub _set_colors {
     }
 }
 
-sub _process {
-    my ( $self, $parser, $result ) = @_;
-    $self->_set_colors('reset');
-    return unless $self->_should_display( $parser, $result );
-
+sub _output_result {
+    my ( $self, $parser, $result, $prev_result ) = @_;
     if ( $result->is_test ) {
         if ( !$result->is_ok ) {    # even if it's TODO
             $self->_set_colors('red');
@@ -187,9 +199,8 @@ sub _process {
             $self->_set_colors('white');
         }
     }
-    $self->output( $result->as_string );
+    $self->SUPER::_output_result($parser, $result, $prev_result);
     $self->_set_colors('reset');
-    $self->output("\n");
 }
 
 1;

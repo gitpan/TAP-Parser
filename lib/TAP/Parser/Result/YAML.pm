@@ -1,4 +1,4 @@
-package TAP::Parser::Result::Comment;
+package TAP::Parser::Result::YAML;
 
 use strict;
 
@@ -8,7 +8,7 @@ use TAP::Parser::Result;
 
 =head1 NAME
 
-TAP::Parser::Result::Comment - Comment result token.
+TAP::Parser::Result::YAML - YAML result token.
 
 =head1 VERSION
 
@@ -21,11 +21,12 @@ $VERSION = '0.52';
 =head1 DESCRIPTION
 
 This is a subclass of C<TAP::Parser::Result>.  A token of this class will be
-returned if a comment line is encountered.
+returned if a YAML block is encountered.
 
  1..1
  ok 1 - woo hooo!
- # this is a comment
+
+C<1..1> is the plan.  Gotta have a plan.
 
 =head1 OVERRIDDEN METHODS
 
@@ -36,7 +37,7 @@ They keep me awake at night.
 
 =item * C<as_string>
 
-Note that this method merely returns the comment preceded by a '# '.
+=item * C<raw>
 
 =back
 
@@ -46,16 +47,16 @@ Note that this method merely returns the comment preceded by a '# '.
 
 =head2 Instance methods
 
-=head3 C<comment> 
+=head3 C<data> 
 
-  if ( $result->is_comment ) {
-      my $comment = $result->comment;
-      print "I have something to say:  $comment";
+  if ( $result->is_yaml ) {
+     print $result->data;
   }
+
+Return the parsed YAML data for this result
 
 =cut
 
-sub comment   { shift->{comment} }
-sub as_string { shift->{raw} }
+sub data {shift->{data} }
 
 1;

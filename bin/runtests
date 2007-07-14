@@ -10,29 +10,32 @@ use File::Find;
 use File::Spec;
 use Getopt::Long;
 
+my $DEFAULT_FORMATTER = 'TAP::Harness::Formatter::Basic';
+
 # Allow cuddling the paths with the -I
 @ARGV = map { /^(-I)(.+)/ ? ( $1, $2 ) : $_ } @ARGV;
 my $color_default = -t STDOUT && !( $^O =~ /MSWin32/ );
 
 Getopt::Long::Configure( 'no_ignore_case', 'bundling' );
 GetOptions(
-    'v|verbose'  => \my $VERBOSE,
-    'f|failures' => \my $FAILURES,
-    'l|lib'      => \my $LIB,
-    'b|blib'     => \my $BLIB,
-    's|shuffle'  => \my $SHUFFLE,
-    'c|color!'   => \my $COLOR,
-    'harness=s'  => \my $HARNESS,
-    'r|recurse'  => \my $RECURSE,
-    'p|parse'    => \my $PARSE,
-    'q|quiet'    => \my $QUIET,
-    'Q|QUIET'    => \my $REALLY_QUIET,
-    'e|exec=s'   => \my $EXEC,
-    'execrc=s'   => \my $EXECRC,
-    'I=s@'       => \my @INCLUDES,
-    'directives' => \my $DIRECTIVES,
-    'h|help|?'   => sub { pod2usage( { -verbose => 1 } ); exit },
-    'H|man'      => sub { pod2usage( { -verbose => 2 } ); exit },
+    'v|verbose'   => \my $VERBOSE,
+    'f|failures'  => \my $FAILURES,
+    'l|lib'       => \my $LIB,
+    'b|blib'      => \my $BLIB,
+    's|shuffle'   => \my $SHUFFLE,
+    'c|color!'    => \my $COLOR,
+    'harness=s'   => \my $HARNESS,
+    'formatter=s' => \my $FORMATTER,
+    'r|recurse'   => \my $RECURSE,
+    'p|parse'     => \my $PARSE,
+    'q|quiet'     => \my $QUIET,
+    'Q|QUIET'     => \my $REALLY_QUIET,
+    'e|exec=s'    => \my $EXEC,
+    'm|merge'     => \my $MERGE,
+    'I=s@'        => \my @INCLUDES,
+    'directives'  => \my $DIRECTIVES,
+    'h|help|?'    => sub { pod2usage( { -verbose => 1 } ); exit },
+    'H|man'       => sub { pod2usage( { -verbose => 2 } ); exit },
 
     #'x|xtension=s' => \my $EXTENSION,
     'T' => \my $TAINT_FAIL,
@@ -60,6 +63,18 @@ if ($HARNESS) {
     $harness_class = $HARNESS;
 }
 
+my $formatter_class;
+if ($FORMATTER) {
+    eval "use $FORMATTER";
+    die "Cannot use formatter ($FORMATTER): $@" if $@;
+    $formatter_class = $FORMATTER;
+}
+
+unless ($formatter_class) {
+    eval "use $DEFAULT_FORMATTER";
+    $formatter_class = $DEFAULT_FORMATTER unless $@;
+}
+
 my @tests = get_tests(@ARGV);
 
 shuffle(@tests) if $SHUFFLE;
@@ -74,15 +89,20 @@ if ( $WARNINGS_FAIL && $WARNINGS_WARN ) {
 my %args;
 $args{lib}          = get_libs();
 $args{switches}     = get_switches();
+$args{merge}        = $MERGE if $MERGE;
 $args{verbose}      = $VERBOSE if $VERBOSE;
 $args{failures}     = $FAILURES if $FAILURES;
 $args{quiet}        = 1 if $QUIET;
 $args{really_quiet} = 1 if $REALLY_QUIET;
 $args{errors}       = 1 if $PARSE;
-$args{exec}         = length($EXEC) ? [ split( / /, $EXEC) ] : []
-                        if(defined($EXEC));
-$args{execrc}       = $EXECRC if $EXECRC;
-$args{directives}   = 1 if $DIRECTIVES;
+$args{exec}         = length($EXEC) ? [ split( / /, $EXEC ) ] : []
+  if ( defined($EXEC) );
+$args{directives} = 1 if $DIRECTIVES;
+
+if ($formatter_class) {
+    $args{formatter} = $formatter_class->new;
+}
+
 my $harness = $harness_class->new( \%args );
 $harness->runtests(@tests);
 
@@ -193,6 +213,7 @@ Boolean options
  -c,  --color       Colored test output (default).  See TAP::Harness::Color.
       --nocolor     Do not color test output.
  -f,  --failures    Only show failed tests.
+ -m,  --merge       Merge test scripts' STDERR with their STDOUT.
  -r,  --recurse     Recursively descend into directories.
  -q,  --quiet       Suppress some test output while running tests.
  -Q,  --QUIET       Only print summary results.
@@ -211,7 +232,7 @@ Options which take arguments
  -I                 Library paths to include.
  -e,  --exec        Interpreter to run the tests ('' for compiled tests.)
       --harness     Define test harness to use.  See TAP::Harness.
-      --execrc      Location of 'execrc' file (no short form).
+      --formatter   Result formatter to use. See TAP::Harness.
 
 =head2 Reading from C<STDIN>
 
@@ -247,10 +268,22 @@ switch:
 
  runtests --exec '/usr/bin/ruby -w' t/
  runtests --exec '/usr/bin/perl -Tw -mstrict -Ilib' t/
+ runtests --exec '/path/to/my/customer/exec'
 
-=head2 C<--execrc>
+=head2 C<--merge>
 
-Location of 'execrc' file.  See L<TAP::Harness> for more information.
+If you need to make sure your diagnostics are displayed in the correct
+order relative to test results you can use the C<--merge> option to
+merge the test scripts' STDERR into their STDOUT. 
+
+This guarantees that STDOUT (where the test results appear) and STDOUT
+(where the diagnostics appear) will stay in sync. The harness will
+display any diagnostics your tests emit on STDERR.
+
+Caveat: this is a bit of a kludge. In particular note that if anything
+that appears on STDERR looks like a test result the test harness will
+get confused. Use this option only if you understand the consequences
+and can live with the risk.
 
 =head1 PERFORMANCE
 
