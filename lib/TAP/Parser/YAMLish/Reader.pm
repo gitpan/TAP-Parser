@@ -1,11 +1,10 @@
 package TAP::Parser::YAMLish::Reader;
 
 use strict;
-use warnings;
 
 use vars qw{$VERSION};
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 # TODO:
 #   Handle blessed object syntax
@@ -50,7 +49,7 @@ sub read {
     # Which might not be a bad idea.
     my $dots = $self->_peek;
     die "Missing '...' at end of YAMLish"
-      unless $dots =~ $IS_END_YAML;
+      unless defined $dots and $dots =~ $IS_END_YAML;
 
     delete $self->{reader};
     delete $self->{next};
@@ -269,7 +268,7 @@ TAP::Parser::YAMLish::Reader - Read YAMLish data from iterator
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =head1 SYNOPSIS
 
@@ -280,21 +279,29 @@ permission of Adam Kennedy.
 
 =head1 METHODS
 
-=over
+=head2 Class Methods
 
-=item C<< new >>
+=head3 C<new>
 
-The constructor C<new> creates and returns an empty C<TAP::Parser::YAMLish::Reader> object.
+The constructor C<new> creates and returns an empty
+C<TAP::Parser::YAMLish::Reader> object.
 
-=item C<< read( $stream ) >>
+ my $reader = TAP::Parser::YAMLish::Reader->new; 
 
-Read YAMLish from a TAP::Parser::Iterator and return the data structure it represents.
+=head2 Instance Methods
 
-=item C<< get_raw >>
+=head3 C<read>
+
+ my $got = $reader->read($stream);
+
+Read YAMLish from a L<TAP::Parser::Iterator> and return the data structure it
+represents.
+
+=head3 C<get_raw>
+
+ my $source = $reader->get_source;
 
 Return the raw YAMLish source from the most recent C<read>.
-
-=back
 
 =head1 AUTHOR
 

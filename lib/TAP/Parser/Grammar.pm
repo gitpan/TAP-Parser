@@ -13,11 +13,11 @@ TAP::Parser::Grammar - A grammar for the Test Anything Protocol.
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 DESCRIPTION
 
@@ -28,11 +28,6 @@ Do not attempt to use this class directly.  It won't make sense.  It's mainly
 here to ensure that we will be able to have pluggable grammars when TAP is
 expanded at some future date (plus, this stuff was really cluttering the
 parser).
-
-Note that currently all methods are class methods.  It's intended that this
-will eventually support C<TAP 2.0> and beyond which will necessitate actual
-instance data, but for now, we don't need this.  Hence, the curious decision
-to use a class where one doesn't apparently need one.
 
 =cut
 
@@ -144,6 +139,8 @@ my %token_for = (
 
 ##############################################################################
 
+=head2 Instance Methods
+
 =head3 C<set_version>
 
   $grammar->set_version(13);
@@ -172,7 +169,7 @@ sub set_version {
 
   my $token = $grammar->tokenize;
 
-This method will return a C<TAP::Parser::Result> object representing the
+This method will return a L<TAP::Parser::Result> object representing the
 current line of TAP.
 
 =cut
@@ -193,13 +190,13 @@ sub tokenize {
             last;
         }
     }
-    $token ||= $self->_make_unknown_token( $line );
-    return defined $token ? TAP::Parser::Result->new( $token ) : ();
+
+    $token = $self->_make_unknown_token( $line ) unless $token;
+
+    return TAP::Parser::Result->new( $token );
 }
 
 ##############################################################################
-
-=head2 Class methods
 
 =head3 C<token_types>
 
@@ -274,9 +271,7 @@ sub _make_version_token {
 
 sub _make_plan_token {
     my ( $self, $line, $tests_planned, $skip, $explanation ) = @_;
-    if ( 0 == $tests_planned ) {
-        $skip ||= 'SKIP';
-    }
+
     if ( $skip && 0 != $tests_planned ) {
         warn "Specified SKIP directive in plan but more than 0 tests ($line)\n";
     }
@@ -369,7 +364,7 @@ sub _trim {
 B<NOTE:>  This grammar is slightly out of date.  There's still some discussion
 about it and a new one will be provided when we have things better defined.
 
-The C<TAP::Parser> does not use a formal grammar because TAP is essentially a
+The L<TAP::Parser> does not use a formal grammar because TAP is essentially a
 stream-based protocol.  In fact, it's quite legal to have an infinite stream.
 For the same reason that we don't apply regexes to streams, we're not using a
 formal grammar here.  Instead, we parse the TAP in lines.

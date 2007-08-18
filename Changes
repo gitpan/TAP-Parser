@@ -1,6 +1,25 @@
 Revision history for TAP-Parser
 
-0.52
+0.53
+    - Fixed a few docs nits.
+    - Added -V (--version) switch to runtests.  Suggested by markjugg on
+      Perlmonks.
+    - Fixed failing t/030-grammer.t under 5.9.5. Exact cause still unknown;
+      something to do with localisation of $1 et all I think.
+    - Fixed use of three arg open in t/compat/test-harness-compat; was failing
+      on 5.6.2.
+    - Fixed runtests --exec option. T::H wasn't passing the exec option to
+      T::P.
+    - Merged Leif Eriksen's coverage enhancing changes to 
+      t/080-aggregator.t, t/030-grammar.t
+    - Made various changes so that we test cleanly on 5.0.5.
+    - Many more coverage enhancements by Leif.
+    - Applied Michael Peters' patch to add an EOF callback to TAP::Parser.
+    - Added --reverse option to runtests to run tests in reverse order.
+    - Made runtests exit with non-zero status if the test run had problems.
+    - Stopped TAP::Parser::Iterator::Process from trampling on STDIN.
+
+0.52  14 July 2007
     - Incorporate Schwern's investigations into TAP versions.
       Unversioned TAP is now TAP v12. The lowest explicit version number
       that can be specified is 13.
@@ -65,7 +84,7 @@ Revision history for TAP-Parser
     - Fixed handling of single quoted hash keys in T::P::Y::Reader
     - Made runtests return the TAP::Parser::Aggregator
     - Fixed t/120-harness.t has failures if TAP::Harness::Color cannot
-      load optional modules [27125] - thanks DROLKSY
+      load optional modules [27125] - thanks DROLSKY
     - Fixed parsing of \# in test description  
 0.51 12 March 2007
     - 'execrc' file now allows 'regex' matches for tests.

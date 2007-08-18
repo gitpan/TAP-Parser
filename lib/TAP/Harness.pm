@@ -1,7 +1,6 @@
 package TAP::Harness;
 
 use strict;
-use warnings;
 use Benchmark;
 use File::Spec;
 use File::Path;
@@ -20,11 +19,11 @@ TAP::Harness - Run Perl test scripts with statistics
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 $ENV{HARNESS_ACTIVE}  = 1;
 $ENV{HARNESS_VERSION} = $VERSION;
@@ -102,6 +101,12 @@ BEGIN {
         exec         => sub { shift; shift },
         merge        => sub { shift; shift },
         formatter    => sub { shift; shift },
+        stdout       => sub {
+            my ( $self, $ref ) = @_;
+            ((ref($ref) || '') eq 'SCALAR') or
+                die "catch_output needs a scalar reference";
+            return($ref);
+        },
     );
     my @getter_setters = qw/
       _curr_parser
@@ -143,7 +148,7 @@ BEGIN {
 
 =head1 METHODS
 
-=head2 Class methods
+=head2 Class Methods
 
 =head3 C<new>
 
@@ -164,7 +169,7 @@ Print individual test results to STDOUT.
 
 =item * C<timer>
 
-Append run time for each test to output. Uses Time::HiRes if available.
+Append run time for each test to output. Uses L<Time::HiRes> if available.
 
 =item * C<failures>
 
@@ -250,6 +255,11 @@ true:
 If set to a true value, only test results with directives will be displayed.
 This overrides other settings such as C<verbose> or C<failures>.
 
+=item * C<stdout>
+
+A scalar reference (experimental) for catching standard output.  Maybe
+should be a filehandle.
+
 =back
 
 =cut
@@ -298,17 +308,17 @@ This overrides other settings such as C<verbose> or C<failures>.
 
 Accepts and array of C<@tests> to be run.  This should generally be the names
 of test files, but this is not required.  Each element in C<@tests> will be
-passed to C<TAP::Parser::new()> as a C<source>.  See C<TAP::Parser> for more
+passed to C<TAP::Parser::new()> as a C<source>.  See L<TAP::Parser> for more
 information.
 
 Tests will be run in the order found.
 
-If the environment variable PERL_TEST_HARNESS_DUMP_TAP is defined it
+If the environment variable C<PERL_TEST_HARNESS_DUMP_TAP> is defined it
 should name a directory into which a copy of the raw TAP for each test
 will be written. TAP is written to files named for each test.
 Subdirectories will be created as needed.
 
-Returns a TAP::Parser::Aggregator containing the test results.
+Returns a L<TAP::Parser::Aggregator> containing the test results.
 
 =cut
 
@@ -401,7 +411,7 @@ You can print a useful summary time, if desired, with:
 
 =item * C<tests>
 
-This is an array reference of all test names.  To get the C<TAP::Parser>
+This is an array reference of all test names.  To get the L<TAP::Parser>
 object for individual tests:
 
  my $aggregate = $args->{aggregate};
@@ -492,10 +502,10 @@ sub _output_summary_failure {
     my $output = $method eq 'failed' ? 'failure_output' : 'output';
     my $test   = $self->_curr_test;
     my $parser = $self->_curr_parser;
-    if ( $parser->$method ) {
+    if ( $parser->$method() ) {
         $self->_summary_test_header( $test, $parser );
         $self->$output($name);
-        my @results = $self->balanced_range( 40, $parser->$method );
+        my @results = $self->balanced_range( 40, $parser->$method() );
         $self->$output( sprintf "%s\n" => shift @results );
         my $spaces = ' ' x 16;
         while (@results) {
@@ -530,7 +540,12 @@ like to redirect output somewhere else, just override this method.
 
 sub output {
     my $self = shift;
-    print @_;
+    if(my $out = $self->stdout) {
+        $$out .= $_ for(@_); # XXX what's $\ here?
+    }
+    else {
+        print @_;
+    }
 }
 
 ##############################################################################
@@ -691,12 +706,19 @@ sub output_test_failure {
 
 sub _get_parser_args {
     my ( $self, $test ) = @_;
-    my %args = ( source => $test );
+    my %args = ();
     my @switches = $self->lib if $self->lib;
     push @switches => $self->switches if $self->switches;
     $args{switches} = \@switches;
-    $args{spool}    = $self->_open_spool($test);
+    $args{spool}    = $self->_open_spool( $test );
     $args{merge}    = $self->merge;
+    $args{exec}     = $self->exec;
+    if ( my $exec = $self->exec ) {
+        $args{exec} = [ @$exec, $test ];
+    }
+    else {
+        $args{source} = $test;
+    }
     return \%args;
 }
 
@@ -775,12 +797,12 @@ sub _open_spool {
         my $spool = File::Spec->catfile( $spool_dir, $test );
 
         # Make the directory
-        my ( $vol, $dir, $file ) = File::Spec->splitpath($spool);
-        my $path = File::Spec->catdir( $vol, $dir );
+        my ( $vol, $dir, undef ) = File::Spec->splitpath($spool);
+        my $path = File::Spec->catpath( $vol, $dir, '' );
         eval { mkpath($path) };
         $self->_croak($@) if $@;
 
-        open( my $spool_handle, '>', $spool )
+        open( my $spool_handle, ">$spool" )
           or $self->_croak(" Can't write $spool ( $! ) ");
         return $self->{spool} = $spool_handle;
     }

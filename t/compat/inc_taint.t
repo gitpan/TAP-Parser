@@ -19,17 +19,21 @@ use TAP::Harness::Compatible;
 use Test::More tests => 1;
 use Dev::Null;
 
-push @INC, 'we_added_this_lib';
+{
+    local $ENV{PERL_TEST_HARNESS_DUMP_TAP} = 0;
 
-tie *NULL, 'Dev::Null' or die $!;
-select NULL;
-my ( $tot, $failed ) = TAP::Harness::Compatible::execute_tests(
-    tests => [
-        $ENV{PERL_CORE}
-        ? 'lib/sample-tests/inc_taint'
-        : 't/sample-tests/inc_taint'
-    ]
-);
-select STDOUT;
+    push @INC, 'we_added_this_lib';
 
-ok( _all_ok($tot), 'tests with taint on preserve @INC' );
+    tie *NULL, 'Dev::Null' or die $!;
+    select NULL;
+    my ( $tot, $failed ) = TAP::Harness::Compatible::execute_tests(
+        tests => [
+            $ENV{PERL_CORE}
+            ? 'lib/sample-tests/inc_taint'
+            : 't/sample-tests/inc_taint'
+        ]
+    );
+    select STDOUT;
+
+    ok( _all_ok($tot), 'tests with taint on preserve @INC' );
+}

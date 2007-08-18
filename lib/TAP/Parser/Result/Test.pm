@@ -14,15 +14,15 @@ TAP::Parser::Result::Test - Test result token.
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 DESCRIPTION
 
-This is a subclass of C<TAP::Parser::Result>.  A token of this class will be
+This is a subclass of L<TAP::Parser::Result>.  A token of this class will be
 returned if a test line is encountered.
 
  1..1
@@ -30,11 +30,11 @@ returned if a test line is encountered.
 
 =head1 OVERRIDDEN METHODS
 
-This class is the workhorse of the TAP::Parser system.  Most TAP lines will
+This class is the workhorse of the L<TAP::Parser> system.  Most TAP lines will
 be test lines and if C<< $result->is_test >>, then you have a bunch of methods
 at your disposal.
 
-=head2 Instance methods
+=head2 Instance Methods
 
 =cut
 

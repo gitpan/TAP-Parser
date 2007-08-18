@@ -1,11 +1,10 @@
 package TAP::Parser::YAMLish::Writer;
 
 use strict;
-use warnings;
 
 use vars qw{$VERSION};
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 my $ESCAPE_CHAR = qr{ [ \x00-\x1f \" ] }x;
 
@@ -134,7 +133,7 @@ TAP::Parser::YAMLish::Writer - Write YAMLish data
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =head1 SYNOPSIS
 
@@ -169,13 +168,20 @@ Encodes a scalar, hash reference or array reference as YAMLish.
 
 =head1 METHODS
 
-=over
+=head2 Class Methods
 
-=item C<< new >>
+=head3 C<new>
 
-The constructor C<new> creates and returns an empty C<TAP::Parser::YAMLish::Writer> object.
+ my $writer = TAP::Parser::YAMLish::Writer->new;
 
-=item C<< write( $obj, $output ) >>
+The constructor C<new> creates and returns an empty
+C<TAP::Parser::YAMLish::Writer> object.
+
+=head2 Instance Methods
+
+=head3 C<write>
+
+ $writer->write($obj, $output );
 
 Encode a scalar, hash reference or array reference as YAML.
 
@@ -194,7 +200,7 @@ Encode a scalar, hash reference or array reference as YAML.
     $yw->write( $data, $writer );
 
 
-The C< $output > argument may be
+The C< $output > argument may be:
 
 =over
 
@@ -211,8 +217,6 @@ The C< $output > argument may be
 If you supply a code reference the subroutine will be called once for
 each line of output with the line as its only argument. Passed lines
 will have no trailing newline.
-
-=back
 
 =head1 AUTHOR
 

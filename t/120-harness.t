@@ -19,8 +19,9 @@ END {
       '... and loading it on windows should succeed';
     isa_ok $harness, 'TAP::Harness', '... but the object it returns';
 
-    ok grep( {qr/^Color test output disabled on Windows/} @warnings ),
-      'Using TAP::Harness::Color on Windows should disable colored output';
+    ok( grep( qr/^Color test output disabled on Windows/, @warnings ),
+        'Using TAP::Harness::Color on Windows should disable colored output'
+    );
 
 }
 
@@ -28,7 +29,7 @@ use TAP::Harness;
 use TAP::Harness::Color;
 
 my @HARNESSES = 'TAP::Harness';
-my $PLAN      = 71;
+my $PLAN      = 72;
 
 if ( TAP::Harness::Color->can_color ) {
     push @HARNESSES, 'TAP::Harness::Color';
@@ -76,7 +77,8 @@ foreach my $HARNESS (@HARNESSES) {
         while ( my ( $property, $test ) = each %$test_args ) {
             my $value = $test->{out};
             can_ok $harness, $property;
-            is_deeply scalar $harness->$property, $value, $test->{test_name};
+            is_deeply scalar $harness->$property(), $value,
+              $test->{test_name};
         }
     }
     foreach my $method_data ( harness_methods() ) {
@@ -108,7 +110,7 @@ foreach my $HARNESS (@HARNESSES) {
 
     # normal tests in verbose mode
 
-    ok my $aggregate = $harness->runtests('t/source_tests/harness'),
+    ok my $aggregate = _runtests($harness, 't/source_tests/harness'),
       '... runtests returns the aggregate';
 
     isa_ok $aggregate, 'TAP::Parser::Aggregator';
@@ -133,7 +135,7 @@ foreach my $HARNESS (@HARNESSES) {
     # normal tests in quiet mode
 
     @output = ();
-    $harness_whisper->runtests('t/source_tests/harness');
+    _runtests($harness_whisper, 't/source_tests/harness');
 
     chomp(@output);
     @expected = (
@@ -152,7 +154,7 @@ foreach my $HARNESS (@HARNESSES) {
     # normal tests in really_quiet mode
 
     @output = ();
-    $harness_mute->runtests('t/source_tests/harness');
+    _runtests($harness_mute, 't/source_tests/harness');
 
     chomp(@output);
     @expected = (
@@ -169,7 +171,7 @@ foreach my $HARNESS (@HARNESSES) {
     # normal tests with failures
 
     @output = ();
-    $harness->runtests('t/source_tests/harness_failure');
+    _runtests($harness, 't/source_tests/harness_failure');
 
     my @summary = @output[ 5 .. ( $#output - 1 ) ];
     @output   = @output[ 0 .. 4 ];
@@ -195,7 +197,7 @@ foreach my $HARNESS (@HARNESSES) {
     # quiet tests with failures
 
     @output = ();
-    $harness_whisper->runtests('t/source_tests/harness_failure');
+    _runtests($harness_whisper, 't/source_tests/harness_failure');
 
     pop @output;    # get rid of summary line
     @expected = (
@@ -213,7 +215,7 @@ foreach my $HARNESS (@HARNESSES) {
     # really quiet tests with failures
 
     @output = ();
-    $harness_mute->runtests('t/source_tests/harness_failure');
+    _runtests($harness_mute, 't/source_tests/harness_failure');
 
     pop @output;    # get rid of summary line
     @expected = (
@@ -229,7 +231,7 @@ foreach my $HARNESS (@HARNESSES) {
     # only show directives
 
     @output = ();
-    $harness_directives->runtests('t/source_tests/harness_directives');
+    _runtests($harness_directives, 't/source_tests/harness_directives');
 
     chomp(@output);
 
@@ -266,7 +268,7 @@ foreach my $HARNESS (@HARNESSES) {
     );
 
     @output = ();
-    $harness->runtests('t/source_tests/harness_badtap');
+    _runtests($harness, 't/source_tests/harness_badtap');
     chomp(@output);
 
     @output = map { trim($_) } @output;
@@ -297,31 +299,50 @@ foreach my $HARNESS (@HARNESSES) {
     isa_ok $parser, 'TAP::Parser';
 }
 
-{
-    my @output;
-    local $^W;
-    local *TAP::Harness::_should_show_count = sub {0};
-    local *TAP::Harness::output = sub {
-        my $self = shift;
-        push @output => grep { $_ ne '' }
-          map {
-            local $_ = $_;
-            chomp;
-            trim($_)
-          } @_;
-    };
+# make sure we can exec something ... anything!
+SKIP: {
+
+    my $cat = '/bin/cat';
+    unless ( -e $cat ) {
+        skip "no '$cat'", 1;
+    }
+
+    my $output  = '';
     my $harness = TAP::Harness->new(
-        {   verbose => 1,
-            exec    => [$^X]
+        {   verbose      => 1,
+            really_quiet => 1,
+            really_quiet => 1,
+            stdout       => \$output,
+            exec         => [$cat],
         }
     );
 
-    $harness->runtests(
+    eval { _runtests($harness, 't/data/catme.1') };
+
+    my @output = split( /\n/, $output );
+    pop @output;    # get rid of summary line
+    my $answer = pop @output;
+    is( $answer, 'All tests successful.', 'cat meows' );
+}
+
+# catches "exec accumulates arguments" issue (r77)
+{
+    my $output  = '';
+    my $harness = TAP::Harness->new(
+        {   verbose      => 1,
+            really_quiet => 1,
+            stdout       => \$output,
+            exec         => [$^X]
+        }
+    );
+
+    _runtests(
+        $harness,
         't/source_tests/harness_complain',    # will get mad if run with args
         't/source_tests/harness',
     );
 
-    chomp(@output);
+    my @output = split( /\n/, $output );
     pop @output;                              # get rid of summary line
     is( $output[-1], 'All tests successful.', 'No exec accumulation' );
 }
@@ -422,4 +443,11 @@ sub harness_methods {
             test_name => '... and it should return numbers as ranges'
         },
     };
+}
+
+sub _runtests {
+    my ($harness, @tests) = @_;
+    local $ENV{PERL_TEST_HARNESS_DUMP_TAP} = 0;
+    my $aggregate = $harness->runtests(@tests);
+    return $aggregate;
 }

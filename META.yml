@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                TAP-Parser
-version:             0.52
+version:             0.53
 abstract:            ~
 license:             perl
 generated_by:        ExtUtils::MakeMaker version 6.36

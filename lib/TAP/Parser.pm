@@ -8,8 +8,8 @@ use TAP::Parser::Grammar;
 use TAP::Parser::Result;
 use TAP::Parser::Source;
 use TAP::Parser::Source::Perl;
-use TAP::Parser::Iterator::Array;
-use TAP::Parser::Iterator::Stream;
+use TAP::Parser::Iterator;
+use Carp;
 
 @ISA = qw(TAP::Base);
 
@@ -19,11 +19,11 @@ TAP::Parser - Parse L<TAP|Test::Harness::TAP> output
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 my $DEFAULT_TAP_VERSION = 12;
 my $MAX_TAP_VERSION     = 13;
@@ -63,7 +63,7 @@ BEGIN {
                 my $self = shift;
                 return $self->{$method} unless @_;
                 unless ( ( ref $self ) =~ /^TAP::Parser/ ) { # trusted methods
-                    $self->_croak("$method() may not be set externally");
+                    Carp::croak("$method() may not be set externally");
                 }
                 $self->{$method} = shift;
             };
@@ -76,19 +76,6 @@ BEGIN {
             };
         }
     }
-}
-
-##############################################################################
-
-=head3 C<good_plan>
-
-Deprecated.  Use C<is_good_plan> instead.
-
-=cut
-
-sub good_plan {
-    warn 'good_plan() is deprecated.  Please use "is_good_plan()"';
-    goto &is_good_plan;
 }
 
 =head1 SYNOPSIS
@@ -112,7 +99,7 @@ harnesses C<examples/>.
 
 =head1 METHODS
 
-=head2 Class methods
+=head2 Class Methods
 
 =head3 C<new>
 
@@ -133,7 +120,7 @@ If the source contains a newline, it's assumed to be a string of raw TAP
 output.
 
 If the source is a reference, it's assumed to be something to pass to
-the C<TAP::Parser::Iterator::Stream> constructor. This is used
+the L<TAP::Parser::Iterator::Stream> constructor. This is used
 internally and you should not use it.
 
 Otherwise, the parser does a C<-e> check to see if the source exists.  If so,
@@ -152,9 +139,9 @@ The value should be the complete TAP output.
 =item * C<exec>
 
 If passed an array reference, will attempt to create the iterator by
-passing a C<TAP::Parser::Source> object to
-C<TAP::Parser::Iterator::Source>, using the array reference strings as
-the command arguments to C<&IPC::Open3::open3>:
+passing a L<TAP::Parser::Source> object to
+L<TAP::Parser::Iterator::Source>, using the array reference strings as
+the command arguments to L<IPC::Open3::open3|IPC::Open3>:
 
  exec => [ '/usr/bin/ruby', 't/my_test.rb' ]
 
@@ -207,9 +194,15 @@ If passed a filehandle will write a copy of all parsed TAP to that handle.
 
 =item * C<merge>
 
-If exec is used to specify a process to run this flag determines
-whether STDOUT and STDERR of the process are merged. If false STDOUT is
-not captured.
+If false, STDERR is not captured (though it is 'relayed' to keep it
+somewhat synchronized with STDOUT.)
+
+If true, STDERR and STDOUT are the same filehandle.  This may cause
+breakage if STDERR contains anything resembling TAP format, but does
+allow exact synchronization.
+
+Subtleties of this behavior may be platform-dependent and may change in
+the future.
 
 =back
 
@@ -219,7 +212,7 @@ not captured.
 
 ##############################################################################
 
-=head2 Instance methods
+=head2 Instance Methods
 
 =head3 C<next>
 
@@ -233,7 +226,7 @@ that it is destructive.  You can't rewind and examine previous results.
 
 If callbacks are used, they will be issued before this call returns.
 
-Each result returned is a subclass of C<TAP::Parser::Result>.  See that
+Each result returned is a subclass of L<TAP::Parser::Result>.  See that
 module and related classes for more information on how to use them.
 
 =cut
@@ -254,6 +247,12 @@ sub next {
 
         # Echo TAP to spool file
         $self->_write_to_spool($result);
+    }
+    else {
+        my $code;
+        if ( $code = $self->_callback_for('EOF') ) {
+            $code->($self);
+        }
     }
 
     return $result;
@@ -316,6 +315,7 @@ sub run {
       yaml
       ALL
       ELSE
+      EOF
     );
 
     sub _initialize {
@@ -327,6 +327,7 @@ sub run {
 
         $self->SUPER::_initialize( $arg_for, \@legal_callback );
 
+        # XXX why delete() ?
         my $stream = delete $arg_for->{stream};
         my $tap    = delete $arg_for->{tap};
         my $source = delete $arg_for->{source};
@@ -336,19 +337,19 @@ sub run {
 
         if ( 1 < grep {defined} $stream, $tap, $source ) {
             $self->_croak(
-                "You may only choose one of 'stream', 'tap', or'source'");
+                "You may only choose one of 'stream', 'tap', or 'source'");
         }
         if ( $source && $exec ) {
             $self->_croak(
                 '"source" and "exec" are mutually exclusive options');
         }
         if ($tap) {
-            $stream
-              = TAP::Parser::Iterator::Array->new( [ split "\n" => $tap ] );
+            $stream = TAP::Parser::Iterator->new( [ split "\n" => $tap ] );
         }
         elsif ($exec) {
             my $source = TAP::Parser::Source->new;
             $source->source($exec);
+            $source->merge($merge);    # XXX should just be arguments?
             $stream = $source->get_stream;
             if ( defined $stream ) {
                 if ( defined $stream->exit ) {
@@ -370,9 +371,9 @@ sub run {
                 $perl->switches( $arg_for->{switches} )
                   if $arg_for->{switches};
 
-                $perl->merge($merge);
+                $perl->merge($merge);    # XXX args to new()?
 
-                $stream = $perl->source($source)->get_stream;
+                $stream = $perl->source_file($source)->get_stream;
                 if ( defined $stream ) {
                     if ( defined $stream->exit ) {
                         $self->exit( $stream->exit );
@@ -413,7 +414,7 @@ If you've read this far in the docs, you've seen this:
         print $result->as_string;
     }
 
-Each result returned is a C<TAP::Parser::Result> subclass, referred to as
+Each result returned is a L<TAP::Parser::Result> subclass, referred to as
 I<result types>.
 
 =head2 Result types
@@ -690,11 +691,9 @@ TODO test is returned.
 After parsing the TAP, there are many methods available to let you dig through
 the results and determine what is meaningful to you.
 
-=head3 C<plan>
+=head2 Individual Results
 
- my $plan = $parser->plan;
-
-Returns the test plan, if found.
+These results refer to individual tests which are run.
 
 =head3 C<passed>
 
@@ -714,7 +713,7 @@ sub passed { @{ shift->{passed} } }
  my $failed = $parser->failed; # the number of tests which failed
 
 This method lets you know which (or how many) tests failed.  If a test passed
-but had a TODO directive, it will be counted as a failed test.
+but had a TODO directive, it will B<NOT> be counted as a failed test.
 
 =cut
 
@@ -744,6 +743,7 @@ This method is a synonym for C<actual_passed>.
 
  # the test numbers which actually failed
  my @actual_failed = $parser->actual_failed;
+
  # the number of tests which actually failed
  my $actual_failed = $parser->actual_failed;
 
@@ -771,6 +771,7 @@ sub todo { @{ shift->{todo} } }
 
  # the test numbers which unexpectedly succeeded
  my @todo_passed = $parser->todo_passed;
+
  # the number of tests which unexpectedly succeeded 
  my $todo_passed = $parser->todo_passed;
 
@@ -809,26 +810,26 @@ This method lets you know which (or how many) tests had SKIP directives.
 
 sub skipped { @{ shift->{skipped} } }
 
-##############################################################################
+=head2 Summary Results
 
-=head3 C<has_problems>
+These results are "meta" information about the total results of an individual
+test program.
 
-  if ( $parser->has_problems ) {
-      ...
-  }
+=head3 C<plan>
 
-This is a 'catch-all' method which returns true if any tests have currently
-failed, any TODO tests unexpectedly succeeded, or any parse errors.
+ my $plan = $parser->plan;
+
+Returns the test plan, if found.
+
+=head3 C<good_plan>
+
+Deprecated.  Use C<is_good_plan> instead.
 
 =cut
 
-sub has_problems {
-    my $self = shift;
-    return $self->failed
-      || $self->todo_passed
-      || $self->parse_errors
-      || $self->wait
-      || $self->exit;
+sub good_plan {
+    warn 'good_plan() is deprecated.  Please use "is_good_plan()"';
+    goto &is_good_plan;
 }
 
 ##############################################################################
@@ -858,6 +859,26 @@ plan of '1..17' will mean that 17 tests were planned.
 
 Returns the number of tests which actually were run.  Hopefully this will
 match the number of C<< $parser->tests_planned >>.
+
+=head3 C<has_problems>
+
+  if ( $parser->has_problems ) {
+      ...
+  }
+
+This is a 'catch-all' method which returns true if any tests have currently
+failed, any TODO tests unexpectedly succeeded, or any parse errors occurred.
+
+=cut
+
+sub has_problems {
+    my $self = shift;
+    return $self->failed
+      || $self->todo_passed
+      || $self->parse_errors
+      || $self->wait
+      || $self->exit;
+}
 
 =head3 C<version>
 
@@ -1212,7 +1233,7 @@ sub _finish {
 
 ##############################################################################
 
-=head2 CALLBACKS
+=head1 CALLBACKS
 
 As mentioned earlier, a "callback" key may be added to the
 C<TAP::Parser> constructor. If present, each callback corresponding to a
@@ -1246,51 +1267,50 @@ Callbacks may also be added like this:
  $parser->callback( test => \&test_callback );
  $parser->callback( plan => \&plan_callback );
 
-There are, at the present time, nine keys allowed for callbacks.  These keys
-are case-sensitive.
+The following keys allowed for callbacks. These keys are case-sensitive.
 
 =over 4
 
-=item 1 C<test>
+=item * C<test>
 
 Invoked if C<< $result->is_test >> returns true.
 
-=item 2 C<version>
+=item * C<version>
 
 Invoked if C<< $result->is_version >> returns true.
 
-=item 3 C<plan>
+=item * C<plan>
 
 Invoked if C<< $result->is_plan >> returns true.
 
-=item 4 C<comment>
+=item * C<comment>
 
 Invoked if C<< $result->is_comment >> returns true.
 
-=item 5 C<bailout>
+=item * C<bailout>
 
 Invoked if C<< $result->is_unknown >> returns true.
 
-=item 6 C<yaml>
+=item * C<yaml>
 
 Invoked if C<< $result->is_yaml >> returns true.
 
-=item 6 C<unknown>
+=item * C<unknown>
 
 Invoked if C<< $result->is_unknown >> returns true.
 
-=item 7 C<ELSE>
+=item * C<ELSE>
 
 If a result does not have a callback defined for it, this callback will be
-invoked.  Thus, if all five of the previous result types are specified as
-callbacks, this callback will I<never> be invoked.
+invoked.  Thus, if all of the previous result types are specified as callbacks,
+this callback will I<never> be invoked.
 
-=item 8 C<ALL>
+=item * C<ALL>
 
-This callback will always be invoked and this will happen for each result
-after one of the above six callbacks is invoked.  For example, if
-C<Term::ANSIColor> is loaded, you could use the following to color your test
-output:
+This callback will always be invoked and this will happen for each
+result after one of the above callbacks is invoked.  For example, if
+L<Term::ANSIColor> is loaded, you could use the following to color your
+test output:
 
  my %callbacks = (
      test => sub {
@@ -1322,7 +1342,11 @@ output:
      },
  );
 
-See C<examples/tprove_color> for an example of this.
+=item * C<EOF>
+
+Invoked when there are no more lines to be parsed.  Since there is
+no accompanying L<TAP::Parser::Result> object the C<TAP::Parser> object is
+passed instead.
 
 =back
 
@@ -1341,7 +1365,7 @@ L<Test::Harness>.  However, there are some minor differences.
 
 =item * TODO plans
 
-A little-known feature of C<Test::Harness> is that it supported TODO lists in
+A little-known feature of L<Test::Harness> is that it supported TODO lists in
 the plan:
 
  1..2 todo 2
@@ -1417,10 +1441,13 @@ just words of encouragement have all been forthcoming.
 
 =back
 
-=head1 AUTHOR
+=head1 AUTHORS
 
-Curtis "Ovid" Poe, C<< <ovid@cpan.org> >>
-Andy Armstong, C<< <andy@hexten.net> >>
+Curtis "Ovid" Poe <ovid@cpan.org>
+
+Andy Armstong <andy@hexten.net>
+
+Eric Wilhelm @ <ewilhelm at cpan dot org>
 
 =head1 BUGS
 

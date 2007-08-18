@@ -9,11 +9,11 @@ TAP::Base - Base class that provides common functionality to L<TAP::Parser> and 
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 SYNOPSIS
 
@@ -38,7 +38,7 @@ C<TAP::Base> provides callback management.
 
 =head1 METHODS
 
-=head2 Class methods
+=head2 Class Methods
 
 =head3 C<new>
 

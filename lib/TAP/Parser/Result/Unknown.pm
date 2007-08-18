@@ -14,15 +14,15 @@ TAP::Parser::Result::Unknown - Unknown result token.
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 DESCRIPTION
 
-This is a subclass of C<TAP::Parser::Result>.  A token of this class will be
+This is a subclass of L<TAP::Parser::Result>.  A token of this class will be
 returned if the parser does not recognize the token line.  For example:
 
  1..5

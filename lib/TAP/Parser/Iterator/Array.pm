@@ -11,11 +11,11 @@ TAP::Parser::Iterator::Array - Internal TAP::Parser Iterator
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 SYNOPSIS
 
@@ -24,7 +24,7 @@ $VERSION = '0.52';
 
   my $line = $it->next;
 
-Originally ripped off from C<Test::Harness>.
+Originally ripped off from L<Test::Harness>.
 
 =head1 DESCRIPTION
 
@@ -32,25 +32,31 @@ B<FOR INTERNAL USE ONLY!>
 
 This is a simple iterator wrapper for arrays.
 
-=head2 new()
+=head2 Class Methods
+
+=head3 C<new>
 
 Create an iterator.
 
-=head2 next()
+=head2 Instance Methods
+
+=head3 C<next>
 
 Iterate through it, of course.
 
-=head2 next_raw()
+=head3 C<next_raw>
 
 Iterate raw input without applying any fixes for quirky input syntax.
 
-=head2 wait()
+=head3 C<wait>
 
-Get the wait status for this iterator. For an array iterator this will always be zero.
+Get the wait status for this iterator. For an array iterator this will always
+be zero.
 
-=head2 exit()
+=head3 C<exit>
 
-Get the exit status for this iterator. For an array iterator this will always be zero.
+Get the exit status for this iterator. For an array iterator this will always
+be zero.
 
 =cut
 
@@ -72,11 +78,9 @@ sub exit {
     return;
 }
 
-sub next {
+sub next_raw {
     my $self = shift;
     return $self->{array}->[ $self->{idx}++ ];
 }
-
-sub next_raw { shift->next }
 
 1;

@@ -1,7 +1,6 @@
 package TAP::Harness::Color;
 
 use strict;
-use warnings;
 
 use TAP::Parser;
 use TAP::Harness;
@@ -87,18 +86,18 @@ TAP::Harness::Color - Run Perl test scripts with color
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 DESCRIPTION
 
 Note that this harness is I<experimental>.  You may not like the colors I've
 chosen and I haven't yet provided an easy way to override them.
 
-This test harness is the same as C<TAP::Harness>, but test results are output
+This test harness is the same as L<TAP::Harness>, but test results are output
 in color.  Passing tests are printed in green.  Failing tests are in red.
 Skipped tests are blue on a white background and TODO tests are printed in
 white.
@@ -114,7 +113,7 @@ under Windows) tests will be run without color.
 
 =head1 METHODS
 
-=head2 Class methods
+=head2 Class Methods
 
 =head3 C<new>
 
@@ -126,8 +125,8 @@ under Windows) tests will be run without color.
  my $harness = TAP::Harness::Color->new( \%args );
 
 The constructor returns a new C<TAP::Harness::Color> object.  If
-C<Term::ANSIColor> is not installed, returns a C<TAP::Harness> object.  See
-C<TAP::Harness> for more details.
+L<Term::ANSIColor> is not installed, returns a L<TAP::Harness> object.  See
+L<TAP::Harness> for more details.
 
 =cut
 

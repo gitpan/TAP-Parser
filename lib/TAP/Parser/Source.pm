@@ -14,11 +14,11 @@ TAP::Parser::Source - Stream output from some source
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 DESCRIPTION
 
@@ -32,7 +32,7 @@ Takes a command and hopefully returns a stream from it.
 
 =head1 METHODS
 
-=head2 Class methods
+=head2 Class Methods
 
 =head3 C<new>
 
@@ -51,7 +51,7 @@ sub new {
 
 ##############################################################################
 
-=head2 Instance methods
+=head2 Instance Methods
 
 =head3 C<source>
 
@@ -62,7 +62,7 @@ sub new {
  $source->source(['/usr/bin/ruby', 't/ruby_test.rb']);
 
 Getter/setter for the source.  The source should generally consist of an array
-reference of strings which, when executed via C<&IPC::Open3::open3>, should
+reference of strings which, when executed via L<&IPC::Open3::open3|IPC::Open3>, should
 return a filehandle which returns successive rows of TAP.
 
 =cut
@@ -99,7 +99,7 @@ sub get_stream {
     );
 }
 
-sub _get_command { @{ shift->source } }
+sub _get_command { return @{ shift->source || [] } }
 
 ##############################################################################
 

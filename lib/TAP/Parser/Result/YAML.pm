@@ -12,15 +12,15 @@ TAP::Parser::Result::YAML - YAML result token.
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 DESCRIPTION
 
-This is a subclass of C<TAP::Parser::Result>.  A token of this class will be
+This is a subclass of L<TAP::Parser::Result>.  A token of this class will be
 returned if a YAML block is encountered.
 
  1..1
@@ -45,7 +45,7 @@ They keep me awake at night.
 
 ##############################################################################
 
-=head2 Instance methods
+=head2 Instance Methods
 
 =head3 C<data> 
 

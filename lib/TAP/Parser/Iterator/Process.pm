@@ -1,17 +1,20 @@
 package TAP::Parser::Iterator::Process;
 
 use strict;
+
 use TAP::Parser::Iterator;
+
 use vars qw($VERSION @ISA);
+
 @ISA = 'TAP::Parser::Iterator';
 
 use IPC::Open3;
 use IO::Select;
 use IO::Handle;
 
-use constant IS_WIN32 => ( $^O =~ /^(MS)?Win32$/ );
-use constant IS_MACOS => ( $^O eq 'MacOS' );
-use constant IS_VMS   => ( $^O eq 'VMS' );
+my $IS_WIN32 = ( $^O =~ /^(MS)?Win32$/ );
+my $IS_MACOS = ( $^O eq 'MacOS' );
+my $IS_VMS   = ( $^O eq 'VMS' );
 
 =head1 NAME
 
@@ -19,11 +22,11 @@ TAP::Parser::Iterator::Process - Internal TAP::Parser Iterator
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 SYNOPSIS
 
@@ -32,7 +35,7 @@ $VERSION = '0.52';
 
   my $line = $it->next;
 
-Originally ripped off from C<Test::Harness>.
+Originally ripped off from L<Test::Harness>.
 
 =head1 DESCRIPTION
 
@@ -40,23 +43,27 @@ B<FOR INTERNAL USE ONLY!>
 
 This is a simple iterator wrapper for processes.
 
-=head2 new()
+=head2 Class Methods
+
+=head3 C<new>
 
 Create an iterator.
 
-=head2 next()
+=head2 Instance Methods
+
+=head3 C<next>
 
 Iterate through it, of course.
 
-=head2 next_raw()
+=head3 C<next_raw>
 
 Iterate raw input without applying any fixes for quirky input syntax.
 
-=head2 wait()
+=head3 C<wait>
 
 Get the wait status for this iterator's process.
 
-=head2 exit()
+=head3 C<exit>
 
 Get the exit status for this iterator's process.
 
@@ -74,8 +81,11 @@ sub new {
     my $class = shift;
     my $args  = shift;
 
-    my @command = @{ delete $args->{command} }
+    local *DUMMY;
+
+    my @command = @{ delete $args->{command} || [] }
       or die "Must supply a command to execute";
+
     my $merge = delete $args->{merge};
     my ( $pid, $err, $sel );
 
@@ -85,18 +95,26 @@ sub new {
 
     my $out = IO::Handle->new;
 
-    if (IS_WIN32) {
+    if ($IS_WIN32) {
+        $err = $merge ? '' : '>&STDERR';
         eval {
-            $pid = open3( undef, $out, $merge ? undef: '>&STDERR', @command );
+            $pid = open3(
+                \*DUMMY, $out,
+                $merge ? '' : $err, @command
+            );
         };
         die "Could not execute (@command): $@" if $@;
-        binmode $out, ':crlf';
+        if ( $] >= 5.006 ) {
+
+            # Kludge to avoid warning under 5.0.5
+            eval 'binmode($out, ":crlf")';
+        }
     }
     else {
-        $err = $merge ? undef: IO::Handle->new;
-        eval { $pid = open3( undef, $out, $err, @command ); };
+        $err = $merge ? '' : IO::Handle->new;
+        eval { $pid = open3( \*DUMMY, $out, $err, @command ); };
         die "Could not execute (@command): $@" if $@;
-        $sel = $merge ? undef: IO::Select->new( $out, $err );
+        $sel = $merge ? undef : IO::Select->new( $out, $err );
     }
 
     my $self = bless {
@@ -126,10 +144,9 @@ sub next_raw {
 
     if ( my $out = $self->{out} ) {
 
-        # If we also have an error handle we need to do the while
-        # select dance.
-        if ( my $err = $self->{err} ) {
-            my $sel  = $self->{sel};
+        # If we have an IO::Select we need to poll it.
+        if ( my $sel = $self->{sel} ) {
+            my $err = $self->{err};
             my $flip = 0;
 
             # Loops forever while we're reading from STDERR
@@ -184,8 +201,12 @@ sub _finish {
     }
 
     ( delete $self->{out} )->close if $self->{out};
-    ( delete $self->{err} )->close if $self->{err};
-    delete $self->{sel}            if $self->{sel};
+
+    # If we have an IO::Select we also have an error handle to close.
+    if ( $self->{sel} ) {
+        ( delete $self->{err} )->close;
+        delete $self->{sel};
+    }
 
     $self->{wait} = $status;
     $self->{exit} = $self->_wait2exit($status);

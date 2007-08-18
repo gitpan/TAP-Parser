@@ -1,7 +1,5 @@
 use strict;
-use warnings;
 use Test::More tests => 9;
-use Data::Dumper;
 
 use TAP::Parser::YAMLish::Writer;
 
@@ -49,14 +47,12 @@ my $in = {
     'date'    => '2001-01-23',
     'tax'     => '251.42',
     'product' => [
-        {
-            'sku'         => 'BL394D',
+        {   'sku'         => 'BL394D',
             'quantity'    => '4',
             'price'       => '450.00',
             'description' => 'Basketball'
         },
-        {
-            'sku'         => 'BL4438H',
+        {   'sku'         => 'BL4438H',
             'quantity'    => '1',
             'price'       => '2392.00',
             'description' => 'Super Hoop'
@@ -72,18 +68,15 @@ my @buf2 = ();
 my $buf3 = '';
 
 my @destination = (
-    {
-        name        => 'Array reference',
+    {   name        => 'Array reference',
         destination => \@buf1,
         normalise   => sub { return \@buf1 },
     },
-    {
-        name        => 'Closure',
+    {   name        => 'Closure',
         destination => sub { push @buf2, shift },
         normalise => sub { return \@buf2 },
     },
-    {
-        name        => 'Scalar',
+    {   name        => 'Scalar',
         destination => \$buf3,
         normalise   => sub {
             my @ar = split( /\n/, $buf3 );
@@ -92,16 +85,12 @@ my @destination = (
     },
 );
 
-for my $dest ( @destination ) {
+for my $dest (@destination) {
     my $name = $dest->{name};
     ok my $yaml = TAP::Parser::YAMLish::Writer->new, "$name: Created";
     isa_ok $yaml, 'TAP::Parser::YAMLish::Writer';
 
-    $yaml->write($in, $dest->{destination});
+    $yaml->write( $in, $dest->{destination} );
     my $got = $dest->{normalise}->();
-    unless ( is_deeply $got, $out, "$name: Result matches" ) {
-        local $Data::Dumper::Useqq = $Data::Dumper::Useqq = 1;
-        diag( Data::Dumper->Dump( [$got], ['$got'] ) );
-        diag( Data::Dumper->Dump( [$out], ['$expected'] ) );
-    }
+    is_deeply $got, $out, "$name: Result matches";
 }

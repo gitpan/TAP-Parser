@@ -9,11 +9,11 @@ TAP::Parser::Aggregator - Aggregate TAP::Parser results.
 
 =head1 VERSION
 
-Version 0.52
+Version 0.53
 
 =cut
 
-$VERSION = '0.52';
+$VERSION = '0.53';
 
 =head1 SYNOPSIS
 
@@ -40,7 +40,7 @@ allows reporting of aggregate results.
 
 =head1 METHODS
 
-=head2 Class methods
+=head2 Class Methods
 
 =head3 C<new>
 
@@ -99,14 +99,14 @@ sub _initialize {
 
 ##############################################################################
 
-=head2 Instance methods
+=head2 Instance Methods
 
 =head3 C<add>
 
   $aggregate->add( $description, $parser );
 
 Takes two arguments, the description of the TAP source (usually a test file
-name, but it doesn't have to be) and a C<TAP::Parser> object.
+name, but it doesn't have to be) and a L<TAP::Parser> object.
 
 Trying to reuse a description is a fatal error.
 
@@ -121,7 +121,7 @@ sub add {
     $self->{parser_for}{$description} = $parser;
 
     while ( my ( $summary, $method ) = each %SUMMARY_METHOD_FOR ) {
-        if ( my $count = $parser->$method ) {
+        if ( my $count = $parser->$method() ) {
             $self->{$summary} += $count;
             push @{ $self->{"descriptions_for_$summary"} } => $description;
         }
