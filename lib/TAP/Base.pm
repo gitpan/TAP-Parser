@@ -9,11 +9,11 @@ TAP::Base - Base class that provides common functionality to L<TAP::Parser> and 
 
 =head1 VERSION
 
-Version 0.53
+Version 0.54
 
 =cut
 
-$VERSION = '0.53';
+$VERSION = '0.54';
 
 =head1 SYNOPSIS
 
@@ -86,6 +86,11 @@ sub callback {
       unless exists $ok_map{$event};
 
     $self->{code_for}{$event} = $callback;
+}
+
+sub _has_callbacks {
+    my $self = shift;
+    return keys %{ $self->{code_for} } != 0;
 }
 
 sub _callback_for {

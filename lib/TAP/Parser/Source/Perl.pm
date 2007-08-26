@@ -16,11 +16,11 @@ TAP::Parser::Source::Perl - Stream Perl output
 
 =head1 VERSION
 
-Version 0.53
+Version 0.54
 
 =cut
 
-$VERSION = '0.53';
+$VERSION = '0.54';
 
 =head1 DESCRIPTION
 
@@ -177,6 +177,8 @@ sub _switches {
     open( TEST, $file ) or print "can't open $file. $!\n";
     my $shebang = <TEST>;
     close(TEST) or print "can't close $file. $!\n";
+
+    $self->_croak("Script $file is empty") unless defined $shebang;
 
     my $taint = ( $shebang =~ /^#!.*\bperl.*\s-\w*([Tt]+)/ );
     push( @switches, "-$1" ) if $taint;

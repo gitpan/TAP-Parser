@@ -1,13 +1,15 @@
-#!/usr/bin/perl -wT
+#!/usr/bin/perl -w
 
 use strict;
 
 use lib 'lib';
 
-use Test::More tests => 220;
+use Test::More tests => 265;
 
 use TAP::Parser;
 use TAP::Parser::Iterator;
+
+use File::Spec;
 
 sub _get_results {
     my $parser = shift;
@@ -464,7 +466,9 @@ is scalar $parser->passed, 2,
 
     sub dump {
         my $self = shift;
-        return @$self;
+        my @got  = @$self;
+        @$self = ();
+        return @got;
     }
 
     package main;
@@ -487,17 +491,37 @@ ok 6 - you shall not pass! # TODO should have failed
 not ok 7 - Gandalf wins.  Game over.  # TODO 'bout time!
 END_TAP
 
-    my $parser = $PARSER->new(
-        {   tap   => $tap,
-            spool => \*STDOUT,
-        }
-    );
+    {
+        my $parser = $PARSER->new(
+            {   tap   => $tap,
+                spool => \*STDOUT,
+            }
+        );
 
-    _get_results($parser);
+        _get_results($parser);
 
-    my @spooled = tied(*STDOUT)->dump();
+        my @spooled = tied(*STDOUT)->dump();
 
-    is @spooled, 24, 'coverage testing for spool attribute of parser';
+        is @spooled, 24, 'coverage testing for spool attribute of parser';
+        is join( '', @spooled ), $tap, "spooled tap matches";
+    }
+
+    {
+        my $parser = $PARSER->new(
+            {   tap   => $tap,
+                spool => \*STDOUT,
+            }
+        );
+
+        $parser->callback( 'ALL', sub { } );
+
+        _get_results($parser);
+
+        my @spooled = tied(*STDOUT)->dump();
+
+        is @spooled, 24, 'coverage testing for spool attribute of parser';
+        is join( '', @spooled ), $tap, "spooled tap matches";
+    }
 }
 
 {
@@ -593,4 +617,400 @@ END_TAP
     like pop @warn,
       qr/"todo_failed" is deprecated.  Please use "todo_passed".  See the docs[.]/,
       '..and failed as expected'
+}
+
+{
+
+    # coverage testing for T::P::_initialize
+
+    # coverage of the source argument paths
+
+    # ref argument to source
+
+    my $parser = TAP::Parser->new( { source => [ split /$/, $tap ] } );
+
+    isa_ok $parser, 'TAP::Parser';
+
+    isa_ok $parser->_stream, 'TAP::Parser::Iterator::Array';
+
+    # uncategorisable argument to source
+    my @die;
+
+    eval {
+        local $SIG{__DIE__} = sub { push @die, @_ };
+
+        $parser = TAP::Parser->new( { source => 'nosuchfile' } );
+    };
+
+    is @die, 1, 'uncategorisable source';
+
+    like pop @die, qr/Cannot determine source for nosuchfile/,
+      '... and we died as expected';
+
+    # coverage test of perl source with switches
+
+    $parser = TAP::Parser->new(
+        {   source =>
+              File::Spec->catfile( 't', 'sample-tests', 'out_err_mix' ),
+        }
+    );
+
+    isa_ok $parser, 'TAP::Parser';
+
+    isa_ok $parser->_stream, 'TAP::Parser::Iterator::Process';
+
+    # Workaround for Mac OS X problem wrt closing the iterator without
+    # reading from it.
+    $parser->next;
+}
+
+{
+
+    # coverage testing for TAP::Parser::has_problems
+
+    # we're going to need to test lots of fragments of tap
+    # to cover all the different boolean tests
+
+    # currently covered are no problems and failed, so let's next test
+    # todo_passed
+
+    my $tap = <<'END_TAP';
+TAP version 13
+1..2
+ok 1 - input file opened
+ok 2 - Gandalf wins.  Game over.  # TODO 'bout time!
+END_TAP
+
+    my $parser = TAP::Parser->new( { tap => $tap } );
+
+    _get_results($parser);
+
+    ok !$parser->failed;
+    ok $parser->todo_passed;
+
+    ok $parser->has_problems;
+
+    # now parse_errors
+
+    $tap = <<'END_TAP';
+TAP version 13
+1..2
+SMACK
+END_TAP
+
+    $parser = TAP::Parser->new( { tap => $tap } );
+
+    _get_results($parser);
+
+    ok !$parser->failed;
+    ok !$parser->todo_passed;
+    ok $parser->parse_errors;
+
+    ok $parser->has_problems;
+
+    # Now wait and exit are hard to do in an OS platform-independent way, so
+    # we won't even bother
+
+    $tap = <<'END_TAP';
+TAP version 13
+1..2
+ok 1 - input file opened
+ok 2 - Gandalf wins
+END_TAP
+
+    $parser = TAP::Parser->new( { tap => $tap } );
+
+    _get_results($parser);
+
+    $parser->wait(1);
+
+    ok !$parser->failed;
+    ok !$parser->todo_passed;
+    ok !$parser->parse_errors;
+
+    ok $parser->wait;
+
+    ok $parser->has_problems;
+
+    # and use the same for exit
+
+    $parser->wait(0);
+    $parser->exit(1);
+
+    ok !$parser->failed;
+    ok !$parser->todo_passed;
+    ok !$parser->parse_errors;
+    ok !$parser->wait;
+
+    ok $parser->exit;
+
+    ok $parser->has_problems;
+}
+
+{
+
+    # coverage testing of the version states
+
+    my $tap = <<'END_TAP';
+TAP version 12
+1..2
+ok 1 - input file opened
+ok 2 - Gandalf wins
+END_TAP
+
+    my $parser = TAP::Parser->new( { tap => $tap } );
+
+    _get_results($parser);
+
+    my @errors = $parser->parse_errors;
+
+    is @errors, 1, 'test too low version number';
+
+    like pop @errors,
+      qr/Explicit TAP version must be at least 13. Got version 12/,
+      '... and trapped expected version error';
+
+    # now too high a version
+    $tap = <<'END_TAP';
+TAP version 14
+1..2
+ok 1 - input file opened
+ok 2 - Gandalf wins
+END_TAP
+
+    $parser = TAP::Parser->new( { tap => $tap } );
+
+    _get_results($parser);
+
+    @errors = $parser->parse_errors;
+
+    is @errors, 1, 'test too high version number';
+
+    like pop @errors,
+      qr/TAP specified version 14 but we don't about versions later than 13/,
+      '... and trapped expected version error';
+}
+
+{
+
+    # coverage testing of TAP version in the wrong place
+
+    my $tap = <<'END_TAP';
+1..2
+ok 1 - input file opened
+TAP version 12
+ok 2 - Gandalf wins
+END_TAP
+
+    my $parser = TAP::Parser->new( { tap => $tap } );
+
+    _get_results($parser);
+
+    my @errors = $parser->parse_errors;
+
+    is @errors, 1, 'test TAP version number in wrong place';
+
+    like pop @errors,
+      qr/If TAP version is present it must be the first line of output/,
+      '... and trapped expected version error';
+
+}
+
+{
+
+    # we're going to bash the internals a bit (but using the API as
+    # much as possible) to force grammar->tokenise() to fail
+
+  # firstly we'll create a stream that dies when its next_raw method is called
+
+    package TAP::Parser::Iterator::Dies;
+
+    use strict;
+    use vars qw(@ISA);
+
+    @ISA = qw(TAP::Parser::Iterator);
+
+    sub new {
+        return bless {}, shift;
+    }
+
+    sub next_raw {
+        die 'this is the dying iterator';
+    }
+
+    # required as part of the TPI interface
+    sub exit { }
+    sub wait { }
+
+    package main;
+
+    # now build a standard parser
+
+    my $tap = <<'END_TAP';
+1..2
+ok 1 - input file opened
+ok 2 - Gandalf wins
+END_TAP
+
+    {
+        my $parser = TAP::Parser->new( { tap => $tap } );
+
+        # build a dying stream
+        my $stream = TAP::Parser::Iterator::Dies->new;
+
+        # now replace the stream - we're forced to us an T::P intenal
+        # method for this
+        $parser->_stream($stream);
+
+        # build a new grammar
+        my $grammar = TAP::Parser::Grammar->new($stream);
+
+        # replace our grammar with this new one
+        $parser->_grammar($grammar);
+
+        # now call next on the parser, and the grammar should die
+        my $result = $parser->next;    # will die in iterator
+
+        is $result, undef, 'iterator dies';
+
+        my @errors = $parser->parse_errors;
+        is @errors, 2, '...and caught expected errrors';
+
+        like shift @errors, qr/this is the dying iterator/,
+          '...and it was what we expected';
+    }
+
+    # Do it all again with callbacks to exercise the other code path in
+    # the unrolled iterator
+    {
+        my $parser = TAP::Parser->new( { tap => $tap } );
+
+        $parser->callback( 'ALL', sub { } );
+
+        # build a dying stream
+        my $stream = TAP::Parser::Iterator::Dies->new;
+
+        # now replace the stream - we're forced to us an T::P intenal
+        # method for this
+        $parser->_stream($stream);
+
+        # build a new grammar
+        my $grammar = TAP::Parser::Grammar->new($stream);
+
+        # replace our grammar with this new one
+        $parser->_grammar($grammar);
+
+        # now call next on the parser, and the grammar should die
+        my $result = $parser->next;    # will die in iterator
+
+        is $result, undef, 'iterator dies';
+
+        my @errors = $parser->parse_errors;
+        is @errors, 2, '...and caught expected errrors';
+
+        like shift @errors, qr/this is the dying iterator/,
+          '...and it was what we expected';
+    }
+}
+
+{
+
+    # coverage testing of TAP::Parser::_next_state
+
+    package TAP::Parser::WithBrokenState;
+    use vars qw(@ISA);
+
+    @ISA = qw< TAP::Parser >;
+
+    sub _make_state_table {
+        return { INIT => { plan => { goto => 'FOO' } } };
+    }
+
+    package main;
+
+    my $tap = <<'END_TAP';
+1..2
+ok 1 - input file opened
+ok 2 - Gandalf wins
+END_TAP
+
+    my $parser = TAP::Parser::WithBrokenState->new( { tap => $tap } );
+
+    my @die;
+
+    eval {
+        local $SIG{__DIE__} = sub { push @die, @_ };
+
+        $parser->next;
+        $parser->next;
+    };
+
+    is @die, 1, 'detect broken state machine';
+
+    like pop @die, qr/Illegal state: FOO/,
+      '...and the message is as we expect';
+}
+
+{
+
+    # coverage testing of TAP::Parser::_iter
+
+    package TAP::Parser::WithBrokenIter;
+    use vars qw(@ISA);
+
+    @ISA = qw< TAP::Parser >;
+
+    sub _iter {return}
+
+    package main;
+
+    my $tap = <<'END_TAP';
+1..2
+ok 1 - input file opened
+ok 2 - Gandalf wins
+END_TAP
+
+    my $parser = TAP::Parser::WithBrokenIter->new( { tap => $tap } );
+
+    my @die;
+
+    eval {
+        local $SIG{__WARN__} = sub { };
+        local $SIG{__DIE__} = sub { push @die, @_ };
+
+        $parser->next;
+    };
+
+    is @die, 1, 'detect broken iter';
+
+    like pop @die, qr/Can't use/, '...and the message is as we expect';
+}
+
+{
+
+    # coverage testing of TAP::Parser::_finish
+
+    my $tap = <<'END_TAP';
+1..2
+ok 1 - input file opened
+ok 2 - Gandalf wins
+END_TAP
+
+    my $parser = TAP::Parser->new( { tap => $tap } );
+
+    $parser->tests_run(999);
+
+    my @die;
+
+    eval {
+        local $SIG{__DIE__} = sub { push @die, @_ };
+
+        _get_results $parser;
+    };
+
+    is @die, 1, 'detect broken test counts';
+
+    like pop @die,
+      qr/Panic: planned test count [(]1001[)] did not equal sum of passed [(]0[)] and failed [(]2[)] tests!/,
+      '...and the message is as we expect';
 }

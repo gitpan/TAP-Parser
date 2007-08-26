@@ -89,8 +89,6 @@ for my $test (@schedule) {
 
     # coverage tests for the ctor
 
-    use IO::Handle;
-
     my $stream = TAP::Parser::Iterator->new( IO::Handle->new );
 
     isa_ok $stream, 'TAP::Parser::Iterator::Stream';
@@ -100,12 +98,12 @@ for my $test (@schedule) {
     eval {
         local $SIG{__DIE__} = sub { push @die, @_ };
 
-        TAP::Parser::Iterator->new( sub { } );
+        TAP::Parser::Iterator->new( \1 ); # a ref to a scalar
     };
 
     is @die, 1, 'coverage of error case';
 
-    like pop @die, qr/Can't iterate with a CODE/,
+    like pop @die, qr/Can't iterate with a SCALAR/,
       '...and we died as expected';
 }
 
